@@ -1,7 +1,9 @@
 import { Request, Response, NextFunction } from 'express';
+import { sendError } from '../utils/response';
 
 export interface AppError extends Error {
   statusCode?: number;
+  messageKey?: string;
 }
 
 export const errorMiddleware = (
@@ -10,9 +12,7 @@ export const errorMiddleware = (
   res: Response,
   _next: NextFunction,
 ): void => {
-  const statusCode = err.statusCode ?? 500;
-  res.status(statusCode).json({
-    success: false,
-    message: err.message ?? 'Internal Server Error',
-  });
+  const status = err.statusCode ?? 500;
+  const message = err.messageKey ?? 'errors.internal_server_error';
+  sendError({ res, status, message });
 };

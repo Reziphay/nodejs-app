@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
+import { sendSuccess } from '../utils/response';
 
 export const healthCheck = (_req: Request, res: Response): void => {
-  res.status(200).json({ success: true, message: 'OK' });
+  sendSuccess({ res, status: 200, message: 'health.ok' });
 };

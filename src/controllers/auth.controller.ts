@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import prisma from '../lib/prisma';
 import { hashPassword, comparePassword } from '../utils/hash';
 import { signAccessToken, signRefreshToken } from '../utils/jwt';
+import { sendSuccess } from '../utils/response';
 import { RegisterInput, LoginInput } from '../schemas/auth.schema';
 import { env } from '../config/env';
 import { AppError } from '../middlewares/error.middleware';
@@ -21,8 +22,9 @@ export const register = async (
     });
 
     if (existing) {
-      const err: AppError = new Error('Email already in use');
+      const err: AppError = new Error();
       err.statusCode = 409;
+      err.messageKey = 'auth.email_already_in_use';
       return next(err);
     }
 
@@ -40,7 +42,7 @@ export const register = async (
       },
     });
 
-    res.status(201).json({ success: true });
+    sendSuccess({ res, status: 201, message: 'auth.register_success' });
   } catch (err) {
     next(err);
   }
@@ -65,16 +67,18 @@ export const login = async (
     });
 
     if (!user) {
-      const err: AppError = new Error('Invalid email or password');
+      const err: AppError = new Error();
       err.statusCode = 401;
+      err.messageKey = 'auth.invalid_credentials';
       return next(err);
     }
 
     const isValid = await comparePassword(body.password, user.hashed_password);
 
     if (!isValid) {
-      const err: AppError = new Error('Invalid email or password');
+      const err: AppError = new Error();
       err.statusCode = 401;
+      err.messageKey = 'auth.invalid_credentials';
       return next(err);
     }
 
@@ -99,8 +103,10 @@ export const login = async (
       },
     });
 
-    res.status(200).json({
-      success: true,
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'auth.login_success',
       data: {
         access_token: accessToken,
         refresh_token: refreshToken,
@@ -139,12 +145,13 @@ export const me = async (
     });
 
     if (!user) {
-      const err: AppError = new Error('User not found');
+      const err: AppError = new Error();
       err.statusCode = 404;
+      err.messageKey = 'auth.user_not_found';
       return next(err);
     }
 
-    res.status(200).json({ success: true, data: { user } });
+    sendSuccess({ res, status: 200, message: 'auth.me_success', data: { user } });
   } catch (err) {
     next(err);
   }

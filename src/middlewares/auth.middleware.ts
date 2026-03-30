@@ -10,8 +10,9 @@ export const authenticate = (
   const authHeader = req.headers['authorization'];
 
   if (!authHeader?.startsWith('Bearer ')) {
-    const err: AppError = new Error('Missing or invalid authorization header');
+    const err: AppError = new Error();
     err.statusCode = 401;
+    err.messageKey = 'errors.missing_token';
     return next(err);
   }
 
@@ -21,8 +22,9 @@ export const authenticate = (
     req.user = verifyAccessToken(token);
     next();
   } catch {
-    const err: AppError = new Error('Invalid or expired token');
+    const err: AppError = new Error();
     err.statusCode = 401;
+    err.messageKey = 'errors.invalid_token';
     next(err);
   }
 };
