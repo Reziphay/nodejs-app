@@ -8,7 +8,18 @@ import { errorMiddleware } from './middlewares/error.middleware';
 
 const app: Application = express();
 
-app.use(helmet());
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'https:'],
+      },
+    },
+  }),
+);
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
