@@ -1,6 +1,7 @@
 import { Router } from 'express';
-import { register, login } from '../../controllers/auth.controller';
+import { register, login, me } from '../../controllers/auth.controller';
 import { validate } from '../../middlewares/validate.middleware';
+import { authenticate } from '../../middlewares/auth.middleware';
 import { registerSchema, loginSchema } from '../../schemas/auth.schema';
 
 const router: Router = Router();
@@ -94,5 +95,24 @@ router.post('/register', validate(registerSchema), register);
  *         description: Invalid email or password
  */
 router.post('/login', validate(loginSchema), login);
+
+/**
+ * @openapi
+ * /api/v1/auth/me:
+ *   get:
+ *     tags:
+ *       - Auth
+ *     summary: Get current authenticated user
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Current user data
+ *       401:
+ *         description: Missing or invalid token
+ *       404:
+ *         description: User not found
+ */
+router.get('/me', authenticate, me);
 
 export default router;

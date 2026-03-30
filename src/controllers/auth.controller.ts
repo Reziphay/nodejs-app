@@ -28,7 +28,7 @@ export const register = async (
 
     const hashed_password = await hashPassword(body.password);
 
-    const user = await prisma.user.create({
+    await prisma.user.create({
       data: {
         first_name: body.first_name,
         last_name: body.last_name,
@@ -38,20 +38,9 @@ export const register = async (
         hashed_password,
         type: body.type,
       },
-      select: {
-        first_name: true,
-        last_name: true,
-        email: true,
-        type: true,
-        email_verified: true,
-        created_at: true,
-      },
     });
 
-    res.status(201).json({
-      success: true,
-      data: { user },
-    });
+    res.status(201).json({ success: true });
   } catch (err) {
     next(err);
   }
@@ -72,9 +61,6 @@ export const login = async (
         email: true,
         type: true,
         hashed_password: true,
-        first_name: true,
-        last_name: true,
-        email_verified: true,
       },
     });
 
@@ -113,16 +99,52 @@ export const login = async (
       },
     });
 
-    const { hashed_password: _, ...safeUser } = user;
-
     res.status(200).json({
       success: true,
       data: {
-        user: safeUser,
         access_token: accessToken,
         refresh_token: refreshToken,
       },
     });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const me = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const userId = req.user.sub;
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        birthday: true,
+        phone: true,
+        country: true,
+        country_prefix: true,
+        email: true,
+        type: true,
+        phone_verified: true,
+        email_verified: true,
+        created_at: true,
+        updated_at: true,
+      },
+    });
+
+    if (!user) {
+      const err: AppError = new Error('User not found');
+      err.statusCode = 404;
+      return next(err);
+    }
+
+    res.status(200).json({ success: true, data: { user } });
   } catch (err) {
     next(err);
   }
