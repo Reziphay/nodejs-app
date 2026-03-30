@@ -1,0 +1,9 @@
+services:
+  app:
+    build: .
+    ports:
+      - '${DOCKER_HOST_PORT}:${PORT}'
+    environment:
+      NODE_ENV: ${NODE_ENV}
+      PORT: ${PORT}
+    restart: unless-stopped

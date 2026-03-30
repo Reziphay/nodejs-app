@@ -1,5 +1,7 @@
-const main = (): void => {
-  console.log('Hello from nodejs-app!');
-};
+import app from './app';
+import { env } from './config/env';
 
-main();
+app.listen(env.PORT, () => {
+  console.log(`Server running on http://localhost:${env.PORT}`);
+  console.log(`Swagger docs: http://localhost:${env.PORT}/api-docs`);
+});
