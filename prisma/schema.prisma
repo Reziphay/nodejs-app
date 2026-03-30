@@ -6,3 +6,41 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+enum UserType {
+  uso
+  ucr
+  admin
+}
+
+model User {
+  id              String    @id @default(cuid())
+  first_name      String
+  last_name       String
+  birthday        DateTime  @db.Date
+  phone           String?   @unique
+  country         String
+  country_prefix  String?
+  email           String    @unique
+  hashed_password String
+  type            UserType  @default(uso)
+  phone_verified  Boolean   @default(false)
+  email_verified  Boolean   @default(false)
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
+
+  refresh_tokens  RefreshToken[]
+
+  @@index([email])
+}
+
+model RefreshToken {
+  id         String   @id @default(cuid())
+  token      String   @unique
+  user_id    String
+  user       User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  expires_at DateTime
+  created_at DateTime @default(now())
+
+  @@index([user_id])
+}
