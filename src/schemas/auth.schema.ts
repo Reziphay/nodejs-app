@@ -38,3 +38,9 @@ export const loginSchema = z.object({
 });
 
 export type LoginInput = z.infer<typeof loginSchema>;
+
+export const refreshSchema = z.object({
+  refresh_token: z.string().min(1, 'Refresh token is required'),
+});
+
+export type RefreshInput = z.infer<typeof refreshSchema>;

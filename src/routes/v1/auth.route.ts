@@ -1,8 +1,8 @@
 import { Router } from 'express';
-import { register, login, me } from '../../controllers/auth.controller';
+import { register, login, refresh, me } from '../../controllers/auth.controller';
 import { validate } from '../../middlewares/validate.middleware';
 import { authenticate } from '../../middlewares/auth.middleware';
-import { registerSchema, loginSchema } from '../../schemas/auth.schema';
+import { registerSchema, loginSchema, refreshSchema } from '../../schemas/auth.schema';
 
 const router: Router = Router();
 
@@ -95,6 +95,8 @@ router.post('/register', validate(registerSchema), register);
  *         description: Invalid email or password
  */
 router.post('/login', validate(loginSchema), login);
+
+router.post('/refresh', validate(refreshSchema), refresh);
 
 /**
  * @openapi

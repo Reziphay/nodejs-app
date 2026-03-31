@@ -2,9 +2,9 @@ import { Request, Response, NextFunction } from 'express';
 import { randomUUID } from 'crypto';
 import prisma from '../lib/prisma';
 import { hashPassword, comparePassword } from '../utils/hash';
-import { signAccessToken, signRefreshToken } from '../utils/jwt';
+import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../utils/jwt';
 import { sendSuccess } from '../utils/response';
-import { RegisterInput, LoginInput } from '../schemas/auth.schema';
+import { RegisterInput, LoginInput, RefreshInput } from '../schemas/auth.schema';
 import { env } from '../config/env';
 import { AppError } from '../middlewares/error.middleware';
 
@@ -110,6 +110,90 @@ export const login = async (
       data: {
         access_token: accessToken,
         refresh_token: refreshToken,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const refresh = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const { refresh_token } = req.body as RefreshInput;
+
+    let payload: ReturnType<typeof verifyRefreshToken>;
+    try {
+      payload = verifyRefreshToken(refresh_token);
+    } catch {
+      const err: AppError = new Error();
+      err.statusCode = 401;
+      err.messageKey = 'errors.invalid_token';
+      return next(err);
+    }
+
+    const stored = await prisma.refreshToken.findUnique({
+      where: { token: refresh_token },
+      select: { id: true, user_id: true, expires_at: true },
+    });
+
+    if (!stored || stored.expires_at < new Date()) {
+      if (stored) {
+        await prisma.refreshToken.delete({ where: { id: stored.id } });
+      }
+      const err: AppError = new Error();
+      err.statusCode = 401;
+      err.messageKey = 'errors.invalid_token';
+      return next(err);
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: payload.sub },
+      select: { id: true, email: true, type: true },
+    });
+
+    if (!user) {
+      await prisma.refreshToken.delete({ where: { id: stored.id } });
+      const err: AppError = new Error();
+      err.statusCode = 401;
+      err.messageKey = 'auth.user_not_found';
+      return next(err);
+    }
+
+    // Rotate: delete old token, issue new pair
+    await prisma.refreshToken.delete({ where: { id: stored.id } });
+
+    const accessToken = signAccessToken({
+      sub: user.id,
+      email: user.email,
+      type: user.type,
+    });
+
+    const jti = randomUUID();
+    const newRefreshToken = signRefreshToken({ sub: user.id, jti });
+
+    const days = Number(env.JWT_REFRESH_EXPIRES_IN.replace('d', '')) || 7;
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + days);
+
+    await prisma.refreshToken.create({
+      data: {
+        token: newRefreshToken,
+        user_id: user.id,
+        expires_at: expiresAt,
+      },
+    });
+
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'auth.refresh_success',
+      data: {
+        access_token: accessToken,
+        refresh_token: newRefreshToken,
       },
     });
   } catch (err) {
