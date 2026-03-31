@@ -25,6 +25,8 @@ RUN pnpm install --frozen-lockfile --prod
 
 COPY --from=builder /app/dist ./dist
 
+RUN mkdir -p /app/logs
+
 EXPOSE 3000
 
 CMD ["node", "dist/index.js"]

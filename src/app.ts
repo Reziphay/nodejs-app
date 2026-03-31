@@ -5,8 +5,12 @@ import swaggerUi from 'swagger-ui-express';
 import { swaggerSpec } from './config/swagger';
 import v1Routes from './routes/v1';
 import { errorMiddleware } from './middlewares/error.middleware';
+import { httpLoggerMiddleware } from './middlewares/http-logger.middleware';
 
 const app: Application = express();
+
+// HTTP request logger — must be first so it captures all requests
+app.use(httpLoggerMiddleware);
 
 app.use(
   helmet({
