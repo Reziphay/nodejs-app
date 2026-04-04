@@ -28,7 +28,18 @@ export const getUserById = async (
   try {
     const id = req.params['id'] as string;
 
-    const user = await prisma.user.findUnique({ where: { id }, select: userSelect });
+    const user = await prisma.user.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        email: true,
+        type: true,
+        created_at: true,
+        updated_at: true,
+      },
+    });
 
     if (!user) {
       const err: AppError = new Error();

@@ -90,7 +90,44 @@ router.patch('/me', authenticate, validate(updateMeSchema), updateMe);
  *         description: The user ID
  *     responses:
  *       200:
- *         description: User profile returned successfully
+ *         description: Public user profile returned successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 status:
+ *                   type: integer
+ *                   example: 200
+ *                 message:
+ *                   type: string
+ *                   example: user.profile_success
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     user:
+ *                       type: object
+ *                       properties:
+ *                         id:
+ *                           type: string
+ *                         first_name:
+ *                           type: string
+ *                         last_name:
+ *                           type: string
+ *                         email:
+ *                           type: string
+ *                         type:
+ *                           type: string
+ *                           enum: [uso, ucr, admin]
+ *                         created_at:
+ *                           type: string
+ *                           format: date-time
+ *                         updated_at:
+ *                           type: string
+ *                           format: date-time
  *       401:
  *         description: Missing or invalid token
  *       404:
