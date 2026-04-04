@@ -10,4 +10,6 @@ export const env = {
   JWT_REFRESH_SECRET: process.env['JWT_REFRESH_SECRET'] ?? '',
   JWT_ACCESS_EXPIRES_IN: process.env['JWT_ACCESS_EXPIRES_IN'] ?? '15m',
   JWT_REFRESH_EXPIRES_IN: process.env['JWT_REFRESH_EXPIRES_IN'] ?? '7d',
+  STORAGE_DIR: process.env['STORAGE_DIR'] ?? 'storage',
+  BASE_URL: process.env['BASE_URL'] ?? `http://localhost:${process.env['PORT'] ?? 3000}`,
 };

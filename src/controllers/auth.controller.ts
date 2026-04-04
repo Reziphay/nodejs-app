@@ -7,6 +7,10 @@ import { sendSuccess } from '../utils/response';
 import { RegisterInput, LoginInput, RefreshInput } from '../schemas/auth.schema';
 import { env } from '../config/env';
 import { AppError } from '../middlewares/error.middleware';
+import { buildFileUrl } from '../services/storage.service';
+
+const resolveAvatarUrl = (storagePath: string | null | undefined): string | null =>
+  storagePath ? buildFileUrl(storagePath) : null;
 
 export const register = async (
   req: Request,
@@ -63,6 +67,7 @@ export const login = async (
         email: true,
         type: true,
         hashed_password: true,
+        avatar_media: { select: { storage_path: true } },
       },
     });
 
@@ -110,6 +115,7 @@ export const login = async (
       data: {
         access_token: accessToken,
         refresh_token: refreshToken,
+        avatar_url: resolveAvatarUrl(user.avatar_media?.storage_path),
       },
     });
   } catch (err) {
@@ -163,7 +169,6 @@ export const refresh = async (
       return next(err);
     }
 
-    // Rotate: delete old token, issue new pair
     await prisma.refreshToken.delete({ where: { id: stored.id } });
 
     const accessToken = signAccessToken({
@@ -223,6 +228,7 @@ export const me = async (
         type: true,
         phone_verified: true,
         email_verified: true,
+        avatar_media: { select: { storage_path: true } },
         created_at: true,
         updated_at: true,
       },
@@ -235,7 +241,19 @@ export const me = async (
       return next(err);
     }
 
-    sendSuccess({ res, status: 200, message: 'auth.me_success', data: { user } });
+    const { avatar_media, ...rest } = user;
+
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'auth.me_success',
+      data: {
+        user: {
+          ...rest,
+          avatar_url: resolveAvatarUrl(avatar_media?.storage_path),
+        },
+      },
+    });
   } catch (err) {
     next(err);
   }

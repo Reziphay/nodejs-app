@@ -1,3 +1,4 @@
+import path from 'path';
 import express, { Application } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -6,10 +7,10 @@ import { swaggerSpec } from './config/swagger';
 import v1Routes from './routes/v1';
 import { errorMiddleware } from './middlewares/error.middleware';
 import { httpLoggerMiddleware } from './middlewares/http-logger.middleware';
+import { env } from './config/env';
 
 const app: Application = express();
 
-// HTTP request logger — must be first so it captures all requests
 app.use(httpLoggerMiddleware);
 
 app.use(
@@ -28,8 +29,10 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+// Serve uploaded files — path must never expose outside storage dir
+app.use('/uploads', express.static(path.resolve(env.STORAGE_DIR), { index: false, dotfiles: 'deny' }));
 
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.use('/api/v1', v1Routes);
 
 app.use(errorMiddleware);

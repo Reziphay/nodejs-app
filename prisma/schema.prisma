@@ -13,25 +13,57 @@ enum UserType {
   admin
 }
 
-model User {
-  id              String    @id @default(cuid())
-  first_name      String
-  last_name       String
-  birthday        DateTime  @db.Date
-  phone           String?   @unique
-  country         String
-  country_prefix  String?
-  email           String    @unique
-  hashed_password String
-  type            UserType  @default(uso)
-  phone_verified  Boolean   @default(false)
-  email_verified  Boolean   @default(false)
-  created_at      DateTime  @default(now())
-  updated_at      DateTime  @updatedAt
+enum MediaKind {
+  avatar
+  document
+  other
+}
 
-  refresh_tokens  RefreshToken[]
+model User {
+  id               String    @id @default(cuid())
+  first_name       String
+  last_name        String
+  birthday         DateTime  @db.Date
+  phone            String?   @unique
+  country          String
+  country_prefix   String?
+  email            String    @unique
+  hashed_password  String
+  type             UserType  @default(uso)
+  phone_verified   Boolean   @default(false)
+  email_verified   Boolean   @default(false)
+  avatar_media_id  String?
+
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  refresh_tokens RefreshToken[]
+  media          Media[]
+
+  avatar_media Media? @relation("UserAvatar", fields: [avatar_media_id], references: [id], onDelete: SetNull)
 
   @@index([email])
+}
+
+model Media {
+  id           String    @id @default(cuid())
+  name         String
+  format       String
+  mime_type    String
+  size         Int
+  kind         MediaKind @default(other)
+  storage_path String
+  checksum     String
+  is_public    Boolean   @default(true)
+  owner_id     String
+  upload_date  DateTime  @default(now())
+  changes_date DateTime  @updatedAt
+
+  owner User @relation(fields: [owner_id], references: [id], onDelete: Cascade)
+
+  avatar_for User[] @relation("UserAvatar")
+
+  @@index([owner_id])
 }
 
 model RefreshToken {

@@ -11,8 +11,11 @@ services:
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
       JWT_ACCESS_EXPIRES_IN: ${JWT_ACCESS_EXPIRES_IN}
       JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN}
+      STORAGE_DIR: /app/storage
+      BASE_URL: ${BASE_URL}
     volumes:
       - ./logs:/app/logs
+      - ./storage:/app/storage
     depends_on:
       db:
         condition: service_healthy

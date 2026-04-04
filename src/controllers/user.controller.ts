@@ -3,8 +3,12 @@ import prisma from '../lib/prisma';
 import { sendSuccess } from '../utils/response';
 import { AppError } from '../middlewares/error.middleware';
 import { UpdateMeInput } from '../schemas/user.schema';
+import { buildFileUrl } from '../services/storage.service';
 
-const userSelect = {
+const resolveAvatarUrl = (storagePath: string | null | undefined): string | null =>
+  storagePath ? buildFileUrl(storagePath) : null;
+
+const privateUserSelect = {
   id: true,
   first_name: true,
   last_name: true,
@@ -16,6 +20,7 @@ const userSelect = {
   type: true,
   phone_verified: true,
   email_verified: true,
+  avatar_media: { select: { storage_path: true } },
   created_at: true,
   updated_at: true,
 } as const;
@@ -36,6 +41,7 @@ export const getUserById = async (
         last_name: true,
         email: true,
         type: true,
+        avatar_media: { select: { storage_path: true } },
         created_at: true,
         updated_at: true,
       },
@@ -48,7 +54,19 @@ export const getUserById = async (
       return next(err);
     }
 
-    sendSuccess({ res, status: 200, message: 'user.profile_success', data: { user } });
+    const { avatar_media, ...rest } = user;
+
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'user.profile_success',
+      data: {
+        user: {
+          ...rest,
+          avatar_url: resolveAvatarUrl(avatar_media?.storage_path),
+        },
+      },
+    });
   } catch (err) {
     next(err);
   }
@@ -118,7 +136,7 @@ export const updateMe = async (
       }
     }
 
-    const user = await prisma.user.update({
+    const updated = await prisma.user.update({
       where: { id: userId },
       data: {
         first_name: body.first_name,
@@ -130,10 +148,22 @@ export const updateMe = async (
         phone: body.phone,
         ...(emailChanged && { email_verified: false }),
       },
-      select: userSelect,
+      select: privateUserSelect,
     });
 
-    sendSuccess({ res, status: 200, message: 'user.update_success', data: { user } });
+    const { avatar_media, ...rest } = updated;
+
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'user.update_success',
+      data: {
+        user: {
+          ...rest,
+          avatar_url: resolveAvatarUrl(avatar_media?.storage_path),
+        },
+      },
+    });
   } catch (err) {
     next(err);
   }

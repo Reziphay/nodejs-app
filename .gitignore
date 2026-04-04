@@ -11,4 +11,7 @@ npm-debug.log*
 logs/*
 !logs/.gitkeep
 
+# User uploaded files — keep the directory, ignore all content
+storage/users/
+
 /src/generated/prisma
