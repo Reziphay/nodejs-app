@@ -1,8 +1,76 @@
 import { Router } from 'express';
-import { getUserById } from '../../controllers/user.controller';
+import { getUserById, updateMe } from '../../controllers/user.controller';
 import { authenticate } from '../../middlewares/auth.middleware';
+import { validate } from '../../middlewares/validate.middleware';
+import { updateMeSchema } from '../../schemas/user.schema';
 
 const router: Router = Router();
+
+/**
+ * @openapi
+ * /api/v1/users/me:
+ *   patch:
+ *     tags:
+ *       - Users
+ *     summary: Update authenticated user's own profile
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - first_name
+ *               - last_name
+ *               - birthday
+ *               - country
+ *               - email
+ *             properties:
+ *               first_name:
+ *                 type: string
+ *                 example: Vugar
+ *               last_name:
+ *                 type: string
+ *                 example: Safarzada
+ *               birthday:
+ *                 type: string
+ *                 format: date
+ *                 example: "1995-06-15"
+ *               country:
+ *                 type: string
+ *                 example: Azerbaijan
+ *               country_prefix:
+ *                 type: string
+ *                 nullable: true
+ *                 example: "+994"
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: vugar@example.com
+ *               phone:
+ *                 type: string
+ *                 nullable: true
+ *                 example: "501234567"
+ *     responses:
+ *       200:
+ *         description: Profile updated successfully
+ *       400:
+ *         description: Validation error
+ *       401:
+ *         description: Missing or invalid token
+ *       404:
+ *         description: User not found
+ *       409:
+ *         description: |
+ *           Conflict. Possible message keys:
+ *           - user.email_already_in_use — email belongs to another account
+ *           - user.phone_already_in_use — phone belongs to another account
+ *           - user.email_change_not_allowed — email is verified and cannot be changed
+ *           - user.phone_change_not_allowed — phone is verified and cannot be changed
+ */
+router.patch('/me', authenticate, validate(updateMeSchema), updateMe);
 
 /**
  * @openapi
