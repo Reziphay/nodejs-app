@@ -25,7 +25,23 @@ app.use(
     },
   }),
 );
-app.use(cors());
+const allowedOrigins = env.CORS_ORIGINS
+  ? env.CORS_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
+  : [];
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow requests with no Origin header (e.g. curl, Swagger UI, same-origin)
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      callback(new Error(`CORS: origin '${origin}' is not allowed`));
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Accept-Language'],
+  }),
+);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
