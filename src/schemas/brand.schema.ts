@@ -29,12 +29,8 @@ export const transferBrandSchema = z.object({
 export type TransferBrandInput = z.infer<typeof transferBrandSchema>;
 
 export const deleteBrandSchema = z.object({
-  service_handling: z.enum(['delete', 'transfer_to_self', 'transfer_to_other']).optional().default('delete'),
-  service_target_user_id: z.string().cuid('Invalid user id').optional(),
-}).refine(
-  (data) => data.service_handling !== 'transfer_to_other' || !!data.service_target_user_id,
-  { message: 'service_target_user_id is required when service_handling is transfer_to_other', path: ['service_target_user_id'] },
-);
+  service_handling: z.literal('delete').optional().default('delete'),
+}).strict();
 
 export type DeleteBrandInput = z.infer<typeof deleteBrandSchema>;
 

@@ -8,6 +8,18 @@ import { buildFileUrl } from '../services/storage.service';
 const resolveAvatarUrl = (storagePath: string | null | undefined): string | null =>
   storagePath ? buildFileUrl(storagePath) : null;
 
+function requireUso(req: Request, next: NextFunction): boolean {
+  if (req.user.type !== 'uso') {
+    const err: AppError = new Error();
+    err.statusCode = 403;
+    err.messageKey = 'errors.forbidden';
+    next(err);
+    return false;
+  }
+
+  return true;
+}
+
 const privateUserSelect = {
   id: true,
   first_name: true,
@@ -175,6 +187,8 @@ export const searchUsoUsers = async (
   next: NextFunction,
 ): Promise<void> => {
   try {
+    if (!requireUso(req, next)) return;
+
     const query = ((req.query['q'] as string) ?? '').trim();
     const excludeId = req.user.sub;
 
@@ -191,7 +205,6 @@ export const searchUsoUsers = async (
           { first_name: { contains: query, mode: 'insensitive' } },
           { last_name: { contains: query, mode: 'insensitive' } },
           { email: { contains: query, mode: 'insensitive' } },
-          { phone: { contains: query, mode: 'insensitive' } },
         ],
       },
       select: {

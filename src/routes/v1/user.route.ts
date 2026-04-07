@@ -72,7 +72,7 @@ const router: Router = Router();
  */
 router.patch('/me', authenticate, validate(updateMeSchema), updateMe);
 
-// Search USO users by name / email / phone (used for brand transfer)
+// Search USO users by name / email for brand transfer (USO only)
 router.get('/search', authenticate, searchUsoUsers);
 
 /**

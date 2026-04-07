@@ -7,7 +7,6 @@ import type {
   CreateBrandInput,
   UpdateBrandInput,
   TransferBrandInput,
-  DeleteBrandInput,
   CreateBranchInput,
   UpdateBranchInput,
 } from '../schemas/brand.schema';
@@ -327,17 +326,6 @@ export const deleteBrand = async (
       return next(err);
     }
     if (!requireOwner(existing.owner_id, userId, next)) return;
-
-    const body = req.body as Partial<DeleteBrandInput>;
-    const serviceHandling = body.service_handling ?? 'delete';
-
-    // TODO(services): When the services module is implemented, handle the service_handling
-    // choice here before deleting the brand:
-    //   - 'delete': delete all services belonging to this brand
-    //   - 'transfer_to_self': re-assign brand services to the owner's self-brand account
-    //   - 'transfer_to_other': initiate service transfer to body.service_target_user_id
-    // For now we proceed with a safe brand-only delete since services don't exist yet.
-    void serviceHandling; // explicitly unused until services module is built
 
     await prisma.brand.delete({ where: { id } });
 
