@@ -90,16 +90,10 @@ export const upsertBrandRatingSchema = z.object({
 
 export type UpsertBrandRatingInput = z.infer<typeof upsertBrandRatingSchema>;
 
-export const deleteBrandSchema = z
-  .object({
-    service_handling: z
-      .enum(['delete_with_services', 'transfer_services_to_self', 'transfer_services_to_other'])
-      .default('delete_with_services'),
-    target_user_id: z.string().cuid('Invalid user id').optional(),
-  })
-  .refine(
-    (data) => data.service_handling !== 'transfer_services_to_other' || !!data.target_user_id,
-    { message: 'target_user_id is required when transferring services to another user', path: ['target_user_id'] },
-  );
+// Only `delete_with_services` is accepted until the Service domain is built.
+// Transfer-service paths are intentionally excluded to prevent misleading clients.
+export const deleteBrandSchema = z.object({
+  service_handling: z.literal('delete_with_services').default('delete_with_services'),
+});
 
 export type DeleteBrandInput = z.infer<typeof deleteBrandSchema>;

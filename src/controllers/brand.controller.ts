@@ -7,7 +7,6 @@ import type {
   CreateBrandInput,
   UpdateBrandInput,
   TransferBrandInput,
-  DeleteBrandInput,
   UpsertBrandRatingInput,
   CreateBranchInput,
   UpdateBranchInput,
@@ -450,7 +449,6 @@ export const deleteBrand = async (
 
     const id = req.params['id'] as string;
     const userId = req.user.sub;
-    const body = req.body as DeleteBrandInput;
 
     const existing = await prisma.brand.findUnique({ where: { id }, select: { owner_id: true } });
     if (!existing) {
@@ -461,33 +459,6 @@ export const deleteBrand = async (
     }
     if (!requireOwner(existing.owner_id, userId, next)) return;
 
-    // When the user chose to transfer services to another USO, validate that the
-    // target exists and is a USO account, then notify them of the intent.
-    if (body.service_handling === 'transfer_services_to_other') {
-      const target = await prisma.user.findUnique({
-        where: { id: body.target_user_id },
-        select: { id: true, type: true },
-      });
-      if (!target || target.type !== 'uso') {
-        const err: AppError = new Error();
-        err.statusCode = 422;
-        err.messageKey = 'user.not_found';
-        return next(err);
-      }
-
-      // Notify the intended recipient. Full service-reassignment will be wired
-      // in once the Service domain is introduced.
-      await prisma.notification.create({
-        data: {
-          user_id: body.target_user_id as string,
-          type: 'service_transfer_intent',
-          title: 'Incoming service transfer intent',
-          body: 'A service owner deleted their brand and intends to transfer their services to you. You will be notified again once the service module is ready to process this transfer.',
-          data: { from_user_id: userId, brand_id: id },
-        },
-      });
-    }
-
     // Cancel any pending brand transfers before deletion so foreign-key cascades
     // do not leave orphaned PENDING records.
     await prisma.brandTransfer.updateMany({
@@ -495,10 +466,10 @@ export const deleteBrand = async (
       data: { status: 'CANCELLED' },
     });
 
-    // TODO: Wire service-handling once the Service domain is built:
-    //   'delete_with_services'      → cascade-delete all services for this brand
-    //   'transfer_services_to_self' → reassign services to the owner's personal account
-    //   'transfer_services_to_other' → create a pending ServiceTransfer + notify recipient
+    // Service-handling paths (transfer_services_to_self / transfer_services_to_other)
+    // are not accepted by the schema until the Service domain is built. The only
+    // supported operation is cascade-deletion, which the DB handles automatically
+    // via the Brand→* Cascade relations.
     await prisma.brand.delete({ where: { id } });
 
     sendSuccess({ res, status: 200, message: 'brand.deleted' });
