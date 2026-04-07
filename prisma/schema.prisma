@@ -37,10 +37,12 @@ model User {
   created_at  DateTime @default(now())
   updated_at  DateTime @updatedAt
 
-  refresh_tokens  RefreshToken[]
-  media           Media[]
-  brands          Brand[]
-  brand_transfers BrandTransfer[] @relation("BrandTransferRequester")
+  refresh_tokens       RefreshToken[]
+  media                Media[]
+  brands               Brand[]
+  brand_transfers      BrandTransfer[] @relation("BrandTransferRequester")
+  received_transfers   BrandTransfer[] @relation("BrandTransferRecipient")
+  notifications        Notification[]
 
   avatar_media Media? @relation("UserAvatar", fields: [avatar_media_id], references: [id], onDelete: SetNull)
 
@@ -166,9 +168,28 @@ model BrandTransfer {
 
   brand      Brand @relation(fields: [brand_id], references: [id], onDelete: Cascade)
   from_user  User  @relation("BrandTransferRequester", fields: [from_user_id], references: [id], onDelete: Cascade)
+  to_user    User  @relation("BrandTransferRecipient", fields: [to_user_id], references: [id], onDelete: Cascade)
 
   @@index([brand_id])
   @@index([from_user_id])
+  @@index([to_user_id])
+}
+
+// ─── Notifications ───────────────────────────────────────────────────────────
+
+model Notification {
+  id         String   @id @default(cuid())
+  user_id    String
+  type       String
+  title      String
+  body       String
+  data       Json?
+  read       Boolean  @default(false)
+  created_at DateTime @default(now())
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
 }
 
 model RefreshToken {

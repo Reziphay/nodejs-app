@@ -7,6 +7,7 @@ import type {
   CreateBrandInput,
   UpdateBrandInput,
   TransferBrandInput,
+  DeleteBrandInput,
   CreateBranchInput,
   UpdateBranchInput,
 } from '../schemas/brand.schema';
@@ -35,6 +36,27 @@ function requireOwner(ownerId: string, userId: string, next: NextFunction): bool
   return true;
 }
 
+async function validateMediaOwnership(
+  mediaIds: string[],
+  userId: string,
+  next: NextFunction,
+): Promise<boolean> {
+  if (mediaIds.length === 0) return true;
+  const medias = await prisma.media.findMany({
+    where: { id: { in: mediaIds } },
+    select: { id: true, owner_id: true },
+  });
+  const allOwned = medias.length === mediaIds.length && medias.every((m) => m.owner_id === userId);
+  if (!allOwned) {
+    const err: AppError = new Error();
+    err.statusCode = 403;
+    err.messageKey = 'media.not_owned';
+    next(err);
+    return false;
+  }
+  return true;
+}
+
 const brandSelect = {
   id: true,
   name: true,
@@ -49,6 +71,7 @@ const brandSelect = {
   gallery: {
     select: {
       id: true,
+      media_id: true,
       order: true,
       media: { select: { id: true, storage_path: true } },
     },
@@ -59,7 +82,7 @@ const brandSelect = {
 type BrandRaw = Awaited<ReturnType<typeof prisma.brand.findUniqueOrThrow>> & {
   categories: { id: string; name: string }[];
   logo_media: { id: string; storage_path: string } | null;
-  gallery: { id: string; order: number; media: { id: string; storage_path: string } }[];
+  gallery: { id: string; media_id: string; order: number; media: { id: string; storage_path: string } }[];
 };
 
 function mapBrand(raw: BrandRaw) {
@@ -73,6 +96,7 @@ function mapBrand(raw: BrandRaw) {
     categories: raw.categories,
     gallery: raw.gallery.map((g) => ({
       id: g.id,
+      media_id: g.media_id,
       order: g.order,
       url: buildFileUrl(g.media.storage_path),
     })),
@@ -122,6 +146,13 @@ export const createBrand = async (
     }
 
     const body = req.body as CreateBrandInput;
+
+    // Validate media ownership
+    const allMediaIds = [
+      ...(body.logo_media_id ? [body.logo_media_id] : []),
+      ...(body.gallery_media_ids ?? []),
+    ];
+    if (!(await validateMediaOwnership(allMediaIds, userId, next))) return;
 
     const brand = await prisma.brand.create({
       data: {
@@ -233,6 +264,15 @@ export const updateBrand = async (
 
     const body = req.body as UpdateBrandInput;
 
+    // Validate ownership of any new media being attached
+    const newMediaIds = [
+      ...(body.logo_media_id && body.logo_media_id !== null ? [body.logo_media_id] : []),
+      ...(body.gallery_media_ids ?? []),
+    ];
+    if (!(await validateMediaOwnership(newMediaIds, userId, next))) return;
+
+    // Gallery: if provided, delete all existing entries and recreate the full list.
+    // The frontend must include existing media_ids it wants to keep alongside new ones.
     if (body.gallery_media_ids !== undefined) {
       await prisma.brandGallery.deleteMany({ where: { brand_id: id } });
     }
@@ -242,6 +282,7 @@ export const updateBrand = async (
       data: {
         ...(body.name !== undefined && { name: body.name }),
         ...(body.description !== undefined && { description: body.description }),
+        // logo_media_id can be set to null (removal) or a new id; skip if not in payload
         ...(body.logo_media_id !== undefined && { logo_media_id: body.logo_media_id }),
         ...(body.categoryIds !== undefined && {
           categories: {
@@ -287,6 +328,17 @@ export const deleteBrand = async (
     }
     if (!requireOwner(existing.owner_id, userId, next)) return;
 
+    const body = req.body as Partial<DeleteBrandInput>;
+    const serviceHandling = body.service_handling ?? 'delete';
+
+    // TODO(services): When the services module is implemented, handle the service_handling
+    // choice here before deleting the brand:
+    //   - 'delete': delete all services belonging to this brand
+    //   - 'transfer_to_self': re-assign brand services to the owner's self-brand account
+    //   - 'transfer_to_other': initiate service transfer to body.service_target_user_id
+    // For now we proceed with a safe brand-only delete since services don't exist yet.
+    void serviceHandling; // explicitly unused until services module is built
+
     await prisma.brand.delete({ where: { id } });
 
     sendSuccess({ res, status: 200, message: 'brand.deleted' });
@@ -326,7 +378,10 @@ export const transferBrand = async (
     const id = req.params['id'] as string;
     const userId = req.user.sub;
 
-    const existing = await prisma.brand.findUnique({ where: { id }, select: { owner_id: true } });
+    const existing = await prisma.brand.findUnique({
+      where: { id },
+      select: { owner_id: true, name: true },
+    });
     if (!existing) {
       const err: AppError = new Error();
       err.statusCode = 404;
@@ -346,7 +401,7 @@ export const transferBrand = async (
 
     const targetUser = await prisma.user.findUnique({
       where: { id: body.target_user_id },
-      select: { id: true, type: true },
+      select: { id: true, type: true, first_name: true, last_name: true },
     });
 
     if (!targetUser) {
@@ -378,7 +433,187 @@ export const transferBrand = async (
       },
     });
 
+    // Notify the recipient
+    await prisma.notification.create({
+      data: {
+        user_id: body.target_user_id,
+        type: 'brand_transfer_request',
+        title: 'Brand transfer request',
+        body: `A user wants to transfer the brand "${existing.name}" to you.`,
+        data: { transfer_id: transfer.id, brand_id: id },
+      },
+    });
+
     sendSuccess({ res, status: 201, message: 'brand.transfer_initiated', data: { transfer } });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const acceptTransfer = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const transferId = req.params['transferId'] as string;
+    const userId = req.user.sub;
+
+    const transfer = await prisma.brandTransfer.findUnique({
+      where: { id: transferId },
+      select: { id: true, brand_id: true, from_user_id: true, to_user_id: true, status: true, brand: { select: { name: true } } },
+    });
+
+    if (!transfer || transfer.to_user_id !== userId) {
+      const err: AppError = new Error();
+      err.statusCode = 404;
+      err.messageKey = 'brand.transfer_not_found';
+      return next(err);
+    }
+
+    if (transfer.status !== 'PENDING') {
+      const err: AppError = new Error();
+      err.statusCode = 400;
+      err.messageKey = 'brand.transfer_not_pending';
+      return next(err);
+    }
+
+    // Update owner and mark transfer accepted atomically
+    await prisma.$transaction([
+      prisma.brand.update({
+        where: { id: transfer.brand_id },
+        data: { owner_id: userId },
+      }),
+      prisma.brandTransfer.update({
+        where: { id: transferId },
+        data: { status: 'ACCEPTED' },
+      }),
+    ]);
+
+    // Notify the sender
+    await prisma.notification.create({
+      data: {
+        user_id: transfer.from_user_id,
+        type: 'brand_transfer_accepted',
+        title: 'Transfer accepted',
+        body: `Your transfer request for brand "${transfer.brand.name}" was accepted.`,
+        data: { transfer_id: transferId, brand_id: transfer.brand_id },
+      },
+    });
+
+    sendSuccess({ res, status: 200, message: 'brand.transfer_accepted' });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const rejectTransfer = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const transferId = req.params['transferId'] as string;
+    const userId = req.user.sub;
+
+    const transfer = await prisma.brandTransfer.findUnique({
+      where: { id: transferId },
+      select: { id: true, brand_id: true, from_user_id: true, to_user_id: true, status: true, brand: { select: { name: true } } },
+    });
+
+    if (!transfer || transfer.to_user_id !== userId) {
+      const err: AppError = new Error();
+      err.statusCode = 404;
+      err.messageKey = 'brand.transfer_not_found';
+      return next(err);
+    }
+
+    if (transfer.status !== 'PENDING') {
+      const err: AppError = new Error();
+      err.statusCode = 400;
+      err.messageKey = 'brand.transfer_not_pending';
+      return next(err);
+    }
+
+    await prisma.brandTransfer.update({
+      where: { id: transferId },
+      data: { status: 'REJECTED' },
+    });
+
+    // Notify the sender
+    await prisma.notification.create({
+      data: {
+        user_id: transfer.from_user_id,
+        type: 'brand_transfer_rejected',
+        title: 'Transfer rejected',
+        body: `Your transfer request for brand "${transfer.brand.name}" was rejected.`,
+        data: { transfer_id: transferId, brand_id: transfer.brand_id },
+      },
+    });
+
+    sendSuccess({ res, status: 200, message: 'brand.transfer_rejected' });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const cancelTransfer = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const transferId = req.params['transferId'] as string;
+    const userId = req.user.sub;
+
+    const transfer = await prisma.brandTransfer.findUnique({
+      where: { id: transferId },
+      select: { id: true, from_user_id: true, status: true },
+    });
+
+    if (!transfer || transfer.from_user_id !== userId) {
+      const err: AppError = new Error();
+      err.statusCode = 404;
+      err.messageKey = 'brand.transfer_not_found';
+      return next(err);
+    }
+
+    if (transfer.status !== 'PENDING') {
+      const err: AppError = new Error();
+      err.statusCode = 400;
+      err.messageKey = 'brand.transfer_not_pending';
+      return next(err);
+    }
+
+    await prisma.brandTransfer.update({
+      where: { id: transferId },
+      data: { status: 'CANCELLED' },
+    });
+
+    sendSuccess({ res, status: 200, message: 'brand.transfer_cancelled' });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const listIncomingTransfers = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const userId = req.user.sub;
+
+    const transfers = await prisma.brandTransfer.findMany({
+      where: { to_user_id: userId, status: 'PENDING' },
+      include: {
+        brand: { select: { id: true, name: true, logo_media: { select: { storage_path: true } } } },
+        from_user: { select: { id: true, first_name: true, last_name: true } },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+
+    sendSuccess({ res, status: 200, message: 'brand.transfer_list', data: { transfers } });
   } catch (err) {
     next(err);
   }
@@ -486,6 +721,8 @@ export const updateBranch = async (
         ...(body.is_24_7 !== undefined && { is_24_7: body.is_24_7 }),
         ...(body.opening !== undefined && { opening: body.opening }),
         ...(body.closing !== undefined && { closing: body.closing }),
+        // Clear opening/closing when switching to 24/7
+        ...(body.is_24_7 === true && { opening: null, closing: null }),
         ...(body.breaks !== undefined &&
           body.breaks.length > 0 && {
             breaks: {

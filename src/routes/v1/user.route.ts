@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { getUserById, updateMe } from '../../controllers/user.controller';
+import { getUserById, updateMe, searchUsoUsers } from '../../controllers/user.controller';
 import { authenticate } from '../../middlewares/auth.middleware';
 import { validate } from '../../middlewares/validate.middleware';
 import { updateMeSchema } from '../../schemas/user.schema';
@@ -71,6 +71,9 @@ const router: Router = Router();
  *           - user.phone_change_not_allowed — phone is verified and cannot be changed
  */
 router.patch('/me', authenticate, validate(updateMeSchema), updateMe);
+
+// Search USO users by name / email / phone (used for brand transfer)
+router.get('/search', authenticate, searchUsoUsers);
 
 /**
  * @openapi

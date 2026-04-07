@@ -28,6 +28,16 @@ export const transferBrandSchema = z.object({
 
 export type TransferBrandInput = z.infer<typeof transferBrandSchema>;
 
+export const deleteBrandSchema = z.object({
+  service_handling: z.enum(['delete', 'transfer_to_self', 'transfer_to_other']).optional().default('delete'),
+  service_target_user_id: z.string().cuid('Invalid user id').optional(),
+}).refine(
+  (data) => data.service_handling !== 'transfer_to_other' || !!data.service_target_user_id,
+  { message: 'service_target_user_id is required when service_handling is transfer_to_other', path: ['service_target_user_id'] },
+);
+
+export type DeleteBrandInput = z.infer<typeof deleteBrandSchema>;
+
 // ─── Branch ───────────────────────────────────────────────────────────────────
 
 const timeRegex = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -51,12 +61,7 @@ export const createBranchSchema = z
     breaks: z.array(branchBreakSchema).optional().default([]),
   })
   .refine(
-    (data) => {
-      if (!data.is_24_7 && (data.opening || data.closing)) {
-        return data.opening !== undefined && data.closing !== undefined;
-      }
-      return true;
-    },
+    (data) => data.is_24_7 || (!!data.opening && !!data.closing),
     { message: 'Both opening and closing times are required when is_24_7 is false', path: ['opening'] },
   );
 
@@ -77,8 +82,9 @@ export const updateBranchSchema = z
   })
   .refine(
     (data) => {
-      if (data.is_24_7 === false && (data.opening !== undefined || data.closing !== undefined)) {
-        return data.opening !== undefined && data.closing !== undefined;
+      // Only validate when is_24_7 is explicitly false AND either time is being updated
+      if (data.is_24_7 === false) {
+        return !!data.opening && !!data.closing;
       }
       return true;
     },

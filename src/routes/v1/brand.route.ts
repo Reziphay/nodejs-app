@@ -7,6 +7,10 @@ import {
   updateBrand,
   deleteBrand,
   transferBrand,
+  acceptTransfer,
+  rejectTransfer,
+  cancelTransfer,
+  listIncomingTransfers,
   listPublicBrands,
   addBranch,
   updateBranch,
@@ -21,6 +25,7 @@ import {
   createBrandSchema,
   updateBrandSchema,
   transferBrandSchema,
+  deleteBrandSchema,
   createBranchSchema,
   updateBranchSchema,
 } from '../../schemas/brand.schema';
@@ -204,7 +209,7 @@ router.patch('/brands/:id', authenticate, validate(updateBrandSchema), updateBra
  *       404:
  *         description: Brand not found
  */
-router.delete('/brands/:id', authenticate, deleteBrand);
+router.delete('/brands/:id', authenticate, validate(deleteBrandSchema), deleteBrand);
 
 /**
  * @openapi
@@ -243,6 +248,14 @@ router.delete('/brands/:id', authenticate, deleteBrand);
  *         description: Brand or target user not found
  */
 router.post('/brands/:id/transfer', authenticate, validate(transferBrandSchema), transferBrand);
+
+// List pending incoming transfers for the authenticated user
+router.get('/brands/transfers/incoming', authenticate, listIncomingTransfers);
+
+// Accept / reject / cancel a specific transfer
+router.patch('/brands/transfers/:transferId/accept', authenticate, acceptTransfer);
+router.patch('/brands/transfers/:transferId/reject', authenticate, rejectTransfer);
+router.patch('/brands/transfers/:transferId/cancel', authenticate, cancelTransfer);
 
 // ─── Branches ─────────────────────────────────────────────────────────────────
 

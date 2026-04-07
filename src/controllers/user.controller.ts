@@ -168,3 +168,54 @@ export const updateMe = async (
     next(err);
   }
 };
+
+export const searchUsoUsers = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const query = ((req.query['q'] as string) ?? '').trim();
+    const excludeId = req.user.sub;
+
+    if (query.length < 2) {
+      sendSuccess({ res, status: 200, message: 'user.search', data: { users: [] } });
+      return;
+    }
+
+    const users = await prisma.user.findMany({
+      where: {
+        type: 'uso',
+        id: { not: excludeId },
+        OR: [
+          { first_name: { contains: query, mode: 'insensitive' } },
+          { last_name: { contains: query, mode: 'insensitive' } },
+          { email: { contains: query, mode: 'insensitive' } },
+          { phone: { contains: query, mode: 'insensitive' } },
+        ],
+      },
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        email: true,
+        avatar_media: { select: { storage_path: true } },
+      },
+      take: 10,
+    });
+
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'user.search',
+      data: {
+        users: users.map(({ avatar_media, ...u }) => ({
+          ...u,
+          avatar_url: resolveAvatarUrl(avatar_media?.storage_path),
+        })),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
