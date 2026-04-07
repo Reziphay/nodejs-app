@@ -7,6 +7,7 @@ export const createBrandSchema = z.object({
   description: z.string().max(1000).trim().optional(),
   categoryIds: z.array(z.string().cuid('Invalid category id')).optional().default([]),
   logo_media_id: z.string().cuid('Invalid media id').optional(),
+  gallery_media_ids: z.array(z.string().cuid('Invalid media id')).optional().default([]),
 });
 
 export type CreateBrandInput = z.infer<typeof createBrandSchema>;
@@ -16,6 +17,7 @@ export const updateBrandSchema = z.object({
   description: z.string().max(1000).trim().nullable().optional(),
   categoryIds: z.array(z.string().cuid('Invalid category id')).optional(),
   logo_media_id: z.string().cuid('Invalid media id').nullable().optional(),
+  gallery_media_ids: z.array(z.string().cuid('Invalid media id')).optional(),
 });
 
 export type UpdateBrandInput = z.infer<typeof updateBrandSchema>;

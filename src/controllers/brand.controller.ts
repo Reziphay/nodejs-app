@@ -3,7 +3,7 @@ import prisma from '../lib/prisma';
 import { sendSuccess } from '../utils/response';
 import { AppError } from '../middlewares/error.middleware';
 import { buildFileUrl } from '../services/storage.service';
-import {
+import type {
   CreateBrandInput,
   UpdateBrandInput,
   TransferBrandInput,
@@ -133,6 +133,15 @@ export const createBrand = async (
           body.categoryIds && body.categoryIds.length > 0
             ? { connect: body.categoryIds.map((id) => ({ id })) }
             : undefined,
+        gallery:
+          body.gallery_media_ids && body.gallery_media_ids.length > 0
+            ? {
+                create: body.gallery_media_ids.map((mediaId, index) => ({
+                  media_id: mediaId,
+                  order: index,
+                })),
+              }
+            : undefined,
       },
       select: brandSelect,
     });
@@ -224,6 +233,10 @@ export const updateBrand = async (
 
     const body = req.body as UpdateBrandInput;
 
+    if (body.gallery_media_ids !== undefined) {
+      await prisma.brandGallery.deleteMany({ where: { brand_id: id } });
+    }
+
     const brand = await prisma.brand.update({
       where: { id },
       data: {
@@ -235,6 +248,15 @@ export const updateBrand = async (
             set: body.categoryIds.map((cid) => ({ id: cid })),
           },
         }),
+        ...(body.gallery_media_ids !== undefined &&
+          body.gallery_media_ids.length > 0 && {
+            gallery: {
+              create: body.gallery_media_ids.map((mediaId, index) => ({
+                media_id: mediaId,
+                order: index,
+              })),
+            },
+          }),
       },
       select: brandSelect,
     });

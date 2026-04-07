@@ -75,6 +75,52 @@ export const uploadAvatar = async (
   }
 };
 
+export const uploadBrandMedia = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const userId = req.user.sub;
+
+    if (!req.file) {
+      const err: AppError = new Error();
+      err.statusCode = 400;
+      err.messageKey = 'media.no_file_provided';
+      return next(err);
+    }
+
+    const validated = await validateAndProcessImage(req.file);
+
+    await ensureUserStorageDir(userId);
+    const storagePath = buildStoragePath(userId, 'webp');
+    await writeFileToDisk(storagePath, validated.buffer);
+
+    const media = await prisma.media.create({
+      data: {
+        name: req.file.originalname,
+        format: validated.format,
+        mime_type: validated.mimeType,
+        size: validated.size,
+        kind: 'other',
+        storage_path: storagePath,
+        checksum: validated.checksum,
+        is_public: true,
+        owner_id: userId,
+      },
+    });
+
+    sendSuccess({
+      res,
+      status: 201,
+      message: 'media.brand_upload_success',
+      data: { media_id: media.id, url: buildFileUrl(storagePath) },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const removeAvatar = async (
   req: Request,
   res: Response,

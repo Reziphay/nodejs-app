@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import multer from 'multer';
 import {
   createBrand,
   getMyBrands,
@@ -12,8 +13,10 @@ import {
   deleteBranch,
   listCategories,
 } from '../../controllers/brand.controller';
+import { uploadBrandMedia } from '../../controllers/media.controller';
 import { authenticate } from '../../middlewares/auth.middleware';
 import { validate } from '../../middlewares/validate.middleware';
+import { AppError } from '../../middlewares/error.middleware';
 import {
   createBrandSchema,
   updateBrandSchema,
@@ -22,7 +25,27 @@ import {
   updateBranchSchema,
 } from '../../schemas/brand.schema';
 
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+    if (allowed.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      const err: AppError = new Error();
+      err.statusCode = 415;
+      err.messageKey = 'media.invalid_file_type';
+      cb(err as unknown as null, false);
+    }
+  },
+});
+
 const router: Router = Router();
+
+// ─── Brand media upload ───────────────────────────────────────────────────────
+
+router.post('/brands/media', authenticate, upload.single('file'), uploadBrandMedia);
 
 // ─── Categories (public) ──────────────────────────────────────────────────────
 
