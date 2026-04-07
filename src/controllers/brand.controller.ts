@@ -7,6 +7,7 @@ import type {
   CreateBrandInput,
   UpdateBrandInput,
   TransferBrandInput,
+  UpsertBrandRatingInput,
   CreateBranchInput,
   UpdateBranchInput,
 } from '../schemas/brand.schema';
@@ -15,6 +16,17 @@ import type {
 
 function requireUso(req: Request, next: NextFunction): boolean {
   if (req.user.type !== 'uso') {
+    const err: AppError = new Error();
+    err.statusCode = 403;
+    err.messageKey = 'errors.forbidden';
+    next(err);
+    return false;
+  }
+  return true;
+}
+
+function requireUcr(req: Request, next: NextFunction): boolean {
+  if (req.user.type !== 'ucr') {
     const err: AppError = new Error();
     err.statusCode = 403;
     err.messageKey = 'errors.forbidden';
@@ -56,6 +68,64 @@ async function validateMediaOwnership(
   return true;
 }
 
+async function validateBrandMediaAspectRatios(
+  {
+    logoMediaId,
+    galleryMediaIds,
+  }: {
+    logoMediaId?: string | null;
+    galleryMediaIds?: string[];
+  },
+  next: NextFunction,
+): Promise<boolean> {
+  const ids = [
+    ...(logoMediaId ? [logoMediaId] : []),
+    ...(galleryMediaIds ?? []),
+  ];
+
+  if (ids.length === 0) return true;
+
+  const medias = await prisma.media.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, width: true, height: true },
+  });
+
+  const mediaMap = new Map(medias.map((media) => [media.id, media]));
+
+  const hasExpectedRatio = (width: number | null, height: number | null, expected: number) => {
+    if (!width || !height) return false;
+    return Math.abs(width / height - expected) <= 0.02;
+  };
+
+  if (logoMediaId) {
+    const logoMedia = mediaMap.get(logoMediaId);
+    if (!logoMedia || !hasExpectedRatio(logoMedia.width, logoMedia.height, 1)) {
+      const err: AppError = new Error();
+      err.statusCode = 400;
+      err.messageKey = 'media.invalid_logo_ratio';
+      next(err);
+      return false;
+    }
+  }
+
+  for (const mediaId of galleryMediaIds ?? []) {
+    const galleryMedia = mediaMap.get(mediaId);
+    if (!galleryMedia || !hasExpectedRatio(galleryMedia.width, galleryMedia.height, 16 / 9)) {
+      const err: AppError = new Error();
+      err.statusCode = 400;
+      err.messageKey = 'media.invalid_gallery_ratio';
+      next(err);
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function roundRating(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
 const brandSelect = {
   id: true,
   name: true,
@@ -76,15 +146,32 @@ const brandSelect = {
     },
     orderBy: { order: 'asc' as const },
   },
+  ratings: {
+    select: {
+      value: true,
+      user_id: true,
+    },
+  },
 } as const;
 
 type BrandRaw = Awaited<ReturnType<typeof prisma.brand.findUniqueOrThrow>> & {
   categories: { id: string; name: string }[];
   logo_media: { id: string; storage_path: string } | null;
   gallery: { id: string; media_id: string; order: number; media: { id: string; storage_path: string } }[];
+  ratings: { value: number; user_id: string }[];
 };
 
-function mapBrand(raw: BrandRaw) {
+function mapBrand(raw: BrandRaw, requesterId?: string) {
+  const ratingCount = raw.ratings.length;
+  const ratingAverage =
+    ratingCount > 0
+      ? roundRating(raw.ratings.reduce((sum, rating) => sum + rating.value, 0) / ratingCount)
+      : null;
+  const myRating =
+    requesterId
+      ? raw.ratings.find((rating) => rating.user_id === requesterId)?.value ?? null
+      : null;
+
   return {
     id: raw.id,
     name: raw.name,
@@ -99,6 +186,9 @@ function mapBrand(raw: BrandRaw) {
       order: g.order,
       url: buildFileUrl(g.media.storage_path),
     })),
+    rating: ratingAverage,
+    rating_count: ratingCount,
+    my_rating: myRating,
     created_at: raw.created_at.toISOString(),
     updated_at: raw.updated_at.toISOString(),
   };
@@ -152,6 +242,17 @@ export const createBrand = async (
       ...(body.gallery_media_ids ?? []),
     ];
     if (!(await validateMediaOwnership(allMediaIds, userId, next))) return;
+    if (
+      !(await validateBrandMediaAspectRatios(
+        {
+          logoMediaId: body.logo_media_id,
+          galleryMediaIds: body.gallery_media_ids,
+        },
+        next,
+      ))
+    ) {
+      return;
+    }
 
     const brand = await prisma.brand.create({
       data: {
@@ -172,11 +273,31 @@ export const createBrand = async (
                 })),
               }
             : undefined,
+        branches:
+          body.branches && body.branches.length > 0
+            ? {
+                create: body.branches.map((branch) => ({
+                  name: branch.name,
+                  description: branch.description,
+                  address1: branch.address1,
+                  address2: branch.address2,
+                  phone: branch.phone,
+                  email: branch.email,
+                  is_24_7: branch.is_24_7 ?? false,
+                  opening: branch.is_24_7 ? null : (branch.opening ?? null),
+                  closing: branch.is_24_7 ? null : (branch.closing ?? null),
+                  breaks:
+                    branch.breaks && branch.breaks.length > 0
+                      ? { create: branch.breaks.map((item) => ({ start: item.start, end: item.end })) }
+                      : undefined,
+                })),
+              }
+            : undefined,
       },
       select: brandSelect,
     });
 
-    sendSuccess({ res, status: 201, message: 'brand.created', data: { brand: mapBrand(brand as BrandRaw) } });
+    sendSuccess({ res, status: 201, message: 'brand.created', data: { brand: mapBrand(brand as BrandRaw, userId) } });
   } catch (err) {
     next(err);
   }
@@ -198,7 +319,7 @@ export const getMyBrands = async (
       orderBy: { created_at: 'desc' },
     });
 
-    sendSuccess({ res, status: 200, message: 'brand.list', data: { brands: brands.map((b) => mapBrand(b as BrandRaw)) } });
+    sendSuccess({ res, status: 200, message: 'brand.list', data: { brands: brands.map((b) => mapBrand(b as BrandRaw, userId)) } });
   } catch (err) {
     next(err);
   }
@@ -235,7 +356,7 @@ export const getBrandById = async (
       }
     }
 
-    sendSuccess({ res, status: 200, message: 'brand.found', data: { brand: { ...mapBrand(brand as BrandRaw), branches: brand.branches } } });
+    sendSuccess({ res, status: 200, message: 'brand.found', data: { brand: { ...mapBrand(brand as BrandRaw, req.user?.sub), branches: brand.branches } } });
   } catch (err) {
     next(err);
   }
@@ -269,6 +390,17 @@ export const updateBrand = async (
       ...(body.gallery_media_ids ?? []),
     ];
     if (!(await validateMediaOwnership(newMediaIds, userId, next))) return;
+    if (
+      !(await validateBrandMediaAspectRatios(
+        {
+          logoMediaId: body.logo_media_id,
+          galleryMediaIds: body.gallery_media_ids,
+        },
+        next,
+      ))
+    ) {
+      return;
+    }
 
     // Gallery: if provided, delete all existing entries and recreate the full list.
     // The frontend must include existing media_ids it wants to keep alongside new ones.
@@ -301,7 +433,7 @@ export const updateBrand = async (
       select: brandSelect,
     });
 
-    sendSuccess({ res, status: 200, message: 'brand.updated', data: { brand: mapBrand(brand as BrandRaw) } });
+    sendSuccess({ res, status: 200, message: 'brand.updated', data: { brand: mapBrand(brand as BrandRaw, userId) } });
   } catch (err) {
     next(err);
   }
@@ -327,6 +459,7 @@ export const deleteBrand = async (
     }
     if (!requireOwner(existing.owner_id, userId, next)) return;
 
+    // Service-transfer hooks stay out of this flow until a real Service domain exists.
     await prisma.brand.delete({ where: { id } });
 
     sendSuccess({ res, status: 200, message: 'brand.deleted' });
@@ -348,6 +481,68 @@ export const listPublicBrands = async (
     });
 
     sendSuccess({ res, status: 200, message: 'brand.list', data: { brands: brands.map((b) => mapBrand(b as BrandRaw)) } });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const upsertBrandRating = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    if (!requireUcr(req, next)) return;
+
+    const id = req.params['id'] as string;
+    const userId = req.user.sub;
+    const body = req.body as UpsertBrandRatingInput;
+
+    const brand = await prisma.brand.findUnique({
+      where: { id },
+      select: { id: true, status: true },
+    });
+
+    if (!brand || brand.status !== 'ACTIVE') {
+      const err: AppError = new Error();
+      err.statusCode = 404;
+      err.messageKey = 'brand.not_found';
+      return next(err);
+    }
+
+    await prisma.brandRating.upsert({
+      where: {
+        brand_id_user_id: {
+          brand_id: id,
+          user_id: userId,
+        },
+      },
+      update: { value: body.value },
+      create: {
+        brand_id: id,
+        user_id: userId,
+        value: body.value,
+      },
+    });
+
+    const updatedBrand = await prisma.brand.findUnique({
+      where: { id },
+      select: brandSelect,
+    });
+
+    if (!updatedBrand) {
+      const err: AppError = new Error();
+      err.statusCode = 404;
+      err.messageKey = 'brand.not_found';
+      return next(err);
+    }
+
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'brand.rating_saved',
+      data: { brand: mapBrand(updatedBrand as BrandRaw, userId) },
+    });
   } catch (err) {
     next(err);
   }
@@ -444,6 +639,8 @@ export const acceptTransfer = async (
   next: NextFunction,
 ): Promise<void> => {
   try {
+    if (!requireUso(req, next)) return;
+
     const transferId = req.params['transferId'] as string;
     const userId = req.user.sub;
 
@@ -501,6 +698,8 @@ export const rejectTransfer = async (
   next: NextFunction,
 ): Promise<void> => {
   try {
+    if (!requireUso(req, next)) return;
+
     const transferId = req.params['transferId'] as string;
     const userId = req.user.sub;
 
@@ -551,6 +750,8 @@ export const cancelTransfer = async (
   next: NextFunction,
 ): Promise<void> => {
   try {
+    if (!requireUso(req, next)) return;
+
     const transferId = req.params['transferId'] as string;
     const userId = req.user.sub;
 
@@ -590,18 +791,123 @@ export const listIncomingTransfers = async (
   next: NextFunction,
 ): Promise<void> => {
   try {
+    if (!requireUso(req, next)) return;
+
     const userId = req.user.sub;
 
     const transfers = await prisma.brandTransfer.findMany({
       where: { to_user_id: userId, status: 'PENDING' },
       include: {
         brand: { select: { id: true, name: true, logo_media: { select: { storage_path: true } } } },
-        from_user: { select: { id: true, first_name: true, last_name: true } },
+        from_user: { select: { id: true, first_name: true, last_name: true, avatar_media: { select: { storage_path: true } } } },
+        to_user: { select: { id: true, first_name: true, last_name: true, avatar_media: { select: { storage_path: true } } } },
       },
       orderBy: { created_at: 'desc' },
     });
 
-    sendSuccess({ res, status: 200, message: 'brand.transfer_list', data: { transfers } });
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'brand.transfer_list',
+      data: {
+        transfers: transfers.map((transfer) => ({
+          id: transfer.id,
+          brand_id: transfer.brand_id,
+          from_user_id: transfer.from_user_id,
+          to_user_id: transfer.to_user_id,
+          status: transfer.status,
+          created_at: transfer.created_at.toISOString(),
+          updated_at: transfer.updated_at.toISOString(),
+          brand: {
+            id: transfer.brand.id,
+            name: transfer.brand.name,
+            logo_url: transfer.brand.logo_media?.storage_path
+              ? buildFileUrl(transfer.brand.logo_media.storage_path)
+              : null,
+          },
+          from_user: {
+            id: transfer.from_user.id,
+            first_name: transfer.from_user.first_name,
+            last_name: transfer.from_user.last_name,
+            avatar_url: transfer.from_user.avatar_media?.storage_path
+              ? buildFileUrl(transfer.from_user.avatar_media.storage_path)
+              : null,
+          },
+          to_user: {
+            id: transfer.to_user.id,
+            first_name: transfer.to_user.first_name,
+            last_name: transfer.to_user.last_name,
+            avatar_url: transfer.to_user.avatar_media?.storage_path
+              ? buildFileUrl(transfer.to_user.avatar_media.storage_path)
+              : null,
+          },
+        })),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const listOutgoingTransfers = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    if (!requireUso(req, next)) return;
+
+    const userId = req.user.sub;
+
+    const transfers = await prisma.brandTransfer.findMany({
+      where: { from_user_id: userId, status: 'PENDING' },
+      include: {
+        brand: { select: { id: true, name: true, logo_media: { select: { storage_path: true } } } },
+        from_user: { select: { id: true, first_name: true, last_name: true, avatar_media: { select: { storage_path: true } } } },
+        to_user: { select: { id: true, first_name: true, last_name: true, avatar_media: { select: { storage_path: true } } } },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'brand.transfer_list',
+      data: {
+        transfers: transfers.map((transfer) => ({
+          id: transfer.id,
+          brand_id: transfer.brand_id,
+          from_user_id: transfer.from_user_id,
+          to_user_id: transfer.to_user_id,
+          status: transfer.status,
+          created_at: transfer.created_at.toISOString(),
+          updated_at: transfer.updated_at.toISOString(),
+          brand: {
+            id: transfer.brand.id,
+            name: transfer.brand.name,
+            logo_url: transfer.brand.logo_media?.storage_path
+              ? buildFileUrl(transfer.brand.logo_media.storage_path)
+              : null,
+          },
+          from_user: {
+            id: transfer.from_user.id,
+            first_name: transfer.from_user.first_name,
+            last_name: transfer.from_user.last_name,
+            avatar_url: transfer.from_user.avatar_media?.storage_path
+              ? buildFileUrl(transfer.from_user.avatar_media.storage_path)
+              : null,
+          },
+          to_user: {
+            id: transfer.to_user.id,
+            first_name: transfer.to_user.first_name,
+            last_name: transfer.to_user.last_name,
+            avatar_url: transfer.to_user.avatar_media?.storage_path
+              ? buildFileUrl(transfer.to_user.avatar_media.storage_path)
+              : null,
+          },
+        })),
+      },
+    });
   } catch (err) {
     next(err);
   }

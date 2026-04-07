@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import prisma from '../lib/prisma';
 import { sendSuccess } from '../utils/response';
 import { AppError } from '../middlewares/error.middleware';
-import { validateAndProcessImage, writeFileToDisk } from '../services/media.service';
+import { validateAndProcessImage, writeFileToDisk, type BrandMediaUsage } from '../services/media.service';
 import {
   buildStoragePath,
   ensureUserStorageDir,
@@ -52,6 +52,8 @@ export const uploadAvatar = async (
         kind: 'avatar',
         storage_path: storagePath,
         checksum: validated.checksum,
+        width: validated.width,
+        height: validated.height,
         is_public: true,
         owner_id: userId,
       },
@@ -90,7 +92,11 @@ export const uploadBrandMedia = async (
       return next(err);
     }
 
-    const validated = await validateAndProcessImage(req.file);
+    const usageParam = req.body['usage'];
+    const usage: BrandMediaUsage | undefined =
+      usageParam === 'logo' || usageParam === 'gallery' ? usageParam : undefined;
+
+    const validated = await validateAndProcessImage(req.file, usage);
 
     await ensureUserStorageDir(userId);
     const storagePath = buildStoragePath(userId, 'webp');
@@ -105,6 +111,8 @@ export const uploadBrandMedia = async (
         kind: 'other',
         storage_path: storagePath,
         checksum: validated.checksum,
+        width: validated.width,
+        height: validated.height,
         is_public: true,
         owner_id: userId,
       },

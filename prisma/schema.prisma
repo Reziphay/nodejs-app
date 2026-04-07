@@ -42,6 +42,7 @@ model User {
   brands               Brand[]
   brand_transfers      BrandTransfer[] @relation("BrandTransferRequester")
   received_transfers   BrandTransfer[] @relation("BrandTransferRecipient")
+  brand_ratings        BrandRating[]
   notifications        Notification[]
 
   avatar_media Media? @relation("UserAvatar", fields: [avatar_media_id], references: [id], onDelete: SetNull)
@@ -60,6 +61,8 @@ model Media {
   checksum     String
   is_public    Boolean   @default(true)
   owner_id     String
+  width        Int?
+  height       Int?
   upload_date  DateTime  @default(now())
   changes_date DateTime  @updatedAt
 
@@ -109,6 +112,7 @@ model Brand {
   gallery    BrandGallery[]
   branches   Branch[]
   categories BrandCategory[]
+  ratings    BrandRating[]
   transfers  BrandTransfer[]
 
   @@index([owner_id])
@@ -173,6 +177,22 @@ model BrandTransfer {
   @@index([brand_id])
   @@index([from_user_id])
   @@index([to_user_id])
+}
+
+model BrandRating {
+  id         String   @id @default(cuid())
+  brand_id   String
+  user_id    String
+  value      Int
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  brand Brand @relation(fields: [brand_id], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([brand_id, user_id])
+  @@index([brand_id])
+  @@index([user_id])
 }
 
 // ─── Notifications ───────────────────────────────────────────────────────────

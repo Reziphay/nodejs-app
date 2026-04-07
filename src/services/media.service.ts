@@ -6,6 +6,9 @@ import { AppError } from '../middlewares/error.middleware';
 
 const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
+const ASPECT_RATIO_TOLERANCE = 0.02;
+
+export type BrandMediaUsage = 'logo' | 'gallery';
 
 export interface ValidatedImage {
   buffer: Buffer;
@@ -13,9 +16,34 @@ export interface ValidatedImage {
   mimeType: string;
   size: number;
   checksum: string;
+  width: number;
+  height: number;
 }
 
-export const validateAndProcessImage = async (file: Express.Multer.File): Promise<ValidatedImage> => {
+function ensureAspectRatio(
+  width: number,
+  height: number,
+  usage?: BrandMediaUsage,
+) {
+  if (!usage) return;
+
+  const expectedRatio = usage === 'logo' ? 1 : 16 / 9;
+  const actualRatio = width / height;
+
+  if (Math.abs(actualRatio - expectedRatio) <= ASPECT_RATIO_TOLERANCE) {
+    return;
+  }
+
+  const err: AppError = new Error();
+  err.statusCode = 400;
+  err.messageKey = usage === 'logo' ? 'media.invalid_logo_ratio' : 'media.invalid_gallery_ratio';
+  throw err;
+}
+
+export const validateAndProcessImage = async (
+  file: Express.Multer.File,
+  usage?: BrandMediaUsage,
+): Promise<ValidatedImage> => {
   if (file.size > MAX_SIZE_BYTES) {
     const err: AppError = new Error();
     err.statusCode = 413;
@@ -32,11 +60,26 @@ export const validateAndProcessImage = async (file: Express.Multer.File): Promis
     throw err;
   }
 
+  const image = sharp(file.buffer).rotate();
+  const metadata = await image.metadata();
+
+  if (!metadata.width || !metadata.height) {
+    const err: AppError = new Error();
+    err.statusCode = 415;
+    err.messageKey = 'media.invalid_file_type';
+    throw err;
+  }
+
+  ensureAspectRatio(metadata.width, metadata.height, usage);
+
   // Strip EXIF metadata and normalise via sharp, output as webp
-  const processed = await sharp(file.buffer)
-    .rotate() // auto-rotate based on EXIF orientation then strip
+  const processed = await image
     .webp({ quality: 85 })
     .toBuffer();
+
+  const processedMetadata = await sharp(processed).metadata();
+  const width = processedMetadata.width ?? metadata.width;
+  const height = processedMetadata.height ?? metadata.height;
 
   const checksum = crypto.createHash('sha256').update(processed).digest('hex');
 
@@ -46,6 +89,8 @@ export const validateAndProcessImage = async (file: Express.Multer.File): Promis
     mimeType: 'image/webp',
     size: processed.length,
     checksum,
+    width,
+    height,
   };
 };
 

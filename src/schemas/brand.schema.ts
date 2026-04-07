@@ -1,39 +1,5 @@
 import { z } from 'zod';
 
-// ─── Brand ────────────────────────────────────────────────────────────────────
-
-export const createBrandSchema = z.object({
-  name: z.string().min(2, 'Name must be at least 2 characters').max(100).trim(),
-  description: z.string().max(1000).trim().optional(),
-  categoryIds: z.array(z.string().cuid('Invalid category id')).optional().default([]),
-  logo_media_id: z.string().cuid('Invalid media id').optional(),
-  gallery_media_ids: z.array(z.string().cuid('Invalid media id')).optional().default([]),
-});
-
-export type CreateBrandInput = z.infer<typeof createBrandSchema>;
-
-export const updateBrandSchema = z.object({
-  name: z.string().min(2).max(100).trim().optional(),
-  description: z.string().max(1000).trim().nullable().optional(),
-  categoryIds: z.array(z.string().cuid('Invalid category id')).optional(),
-  logo_media_id: z.string().cuid('Invalid media id').nullable().optional(),
-  gallery_media_ids: z.array(z.string().cuid('Invalid media id')).optional(),
-});
-
-export type UpdateBrandInput = z.infer<typeof updateBrandSchema>;
-
-export const transferBrandSchema = z.object({
-  target_user_id: z.string().cuid('Invalid user id'),
-});
-
-export type TransferBrandInput = z.infer<typeof transferBrandSchema>;
-
-export const deleteBrandSchema = z.object({
-  service_handling: z.literal('delete').optional().default('delete'),
-}).strict();
-
-export type DeleteBrandInput = z.infer<typeof deleteBrandSchema>;
-
 // ─── Branch ───────────────────────────────────────────────────────────────────
 
 const timeRegex = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -88,3 +54,44 @@ export const updateBranchSchema = z
   );
 
 export type UpdateBranchInput = z.infer<typeof updateBranchSchema>;
+
+// ─── Brand ────────────────────────────────────────────────────────────────────
+
+export const createBrandSchema = z.object({
+  name: z.string().min(2, 'Name must be at least 2 characters').max(100).trim(),
+  description: z.string().max(1000).trim().optional(),
+  categoryIds: z.array(z.string().cuid('Invalid category id')).optional().default([]),
+  logo_media_id: z.string().cuid('Invalid media id').optional(),
+  gallery_media_ids: z.array(z.string().cuid('Invalid media id')).optional().default([]),
+  branches: z.array(createBranchSchema).optional().default([]),
+});
+
+export type CreateBrandInput = z.infer<typeof createBrandSchema>;
+
+export const updateBrandSchema = z.object({
+  name: z.string().min(2).max(100).trim().optional(),
+  description: z.string().max(1000).trim().nullable().optional(),
+  categoryIds: z.array(z.string().cuid('Invalid category id')).optional(),
+  logo_media_id: z.string().cuid('Invalid media id').nullable().optional(),
+  gallery_media_ids: z.array(z.string().cuid('Invalid media id')).optional(),
+});
+
+export type UpdateBrandInput = z.infer<typeof updateBrandSchema>;
+
+export const transferBrandSchema = z.object({
+  target_user_id: z.string().cuid('Invalid user id'),
+});
+
+export type TransferBrandInput = z.infer<typeof transferBrandSchema>;
+
+export const upsertBrandRatingSchema = z.object({
+  value: z.number().int().min(1).max(5),
+});
+
+export type UpsertBrandRatingInput = z.infer<typeof upsertBrandRatingSchema>;
+
+export const deleteBrandSchema = z.object({
+  service_handling: z.literal('delete').optional().default('delete'),
+}).strict();
+
+export type DeleteBrandInput = z.infer<typeof deleteBrandSchema>;

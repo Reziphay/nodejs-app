@@ -7,10 +7,12 @@ import {
   updateBrand,
   deleteBrand,
   transferBrand,
+  upsertBrandRating,
   acceptTransfer,
   rejectTransfer,
   cancelTransfer,
   listIncomingTransfers,
+  listOutgoingTransfers,
   listPublicBrands,
   addBranch,
   updateBranch,
@@ -25,6 +27,7 @@ import {
   createBrandSchema,
   updateBrandSchema,
   transferBrandSchema,
+  upsertBrandRatingSchema,
   deleteBrandSchema,
   createBranchSchema,
   updateBranchSchema,
@@ -248,9 +251,11 @@ router.delete('/brands/:id', authenticate, validate(deleteBrandSchema), deleteBr
  *         description: Brand or target user not found
  */
 router.post('/brands/:id/transfer', authenticate, validate(transferBrandSchema), transferBrand);
+router.put('/brands/:id/rating', authenticate, validate(upsertBrandRatingSchema), upsertBrandRating);
 
 // List pending incoming transfers for the authenticated user
 router.get('/brands/transfers/incoming', authenticate, listIncomingTransfers);
+router.get('/brands/transfers/outgoing', authenticate, listOutgoingTransfers);
 
 // Accept / reject / cancel a specific transfer
 router.patch('/brands/transfers/:transferId/accept', authenticate, acceptTransfer);
