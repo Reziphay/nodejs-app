@@ -13,6 +13,20 @@ enum UserType {
   admin
 }
 
+// ─── Team enums ───────────────────────────────────────────────────────────────
+
+enum TeamMemberStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  REMOVED
+}
+
+enum TeamMemberRole {
+  OWNER
+  MEMBER
+}
+
 enum MediaKind {
   avatar
   document
@@ -44,6 +58,9 @@ model User {
   received_transfers   BrandTransfer[] @relation("BrandTransferRecipient")
   brand_ratings        BrandRating[]
   notifications        Notification[]
+  teams_created        Team[]          @relation("TeamCreator")
+  team_memberships     TeamMember[]    @relation("TeamMemberUser")
+  invitations_sent     TeamMember[]    @relation("TeamMemberInviter")
 
   avatar_media Media? @relation("UserAvatar", fields: [avatar_media_id], references: [id], onDelete: SetNull)
 
@@ -148,6 +165,7 @@ model Branch {
 
   brand  Brand         @relation(fields: [brand_id], references: [id], onDelete: Cascade)
   breaks BranchBreak[]
+  team   Team?         @relation("BranchTeam")
 
   @@index([brand_id])
 }
@@ -220,5 +238,46 @@ model RefreshToken {
   expires_at DateTime
   created_at DateTime @default(now())
 
+  @@index([user_id])
+}
+
+// ─── Team models ──────────────────────────────────────────────────────────────
+
+// One Team per Branch. Created automatically when a Branch is created.
+// The brand owner is automatically the first ACCEPTED OWNER member.
+model Team {
+  id                  String   @id @default(cuid())
+  branch_id           String   @unique
+  created_by_user_id  String
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+
+  branch   Branch       @relation("BranchTeam", fields: [branch_id], references: [id], onDelete: Cascade)
+  creator  User         @relation("TeamCreator", fields: [created_by_user_id], references: [id], onDelete: Cascade)
+  members  TeamMember[]
+
+  @@index([created_by_user_id])
+}
+
+// One row per (team, user) pair. Status tracks the invitation lifecycle.
+// Re-inviting a REJECTED/REMOVED user updates this same row (upsert pattern).
+// The OWNER row is immutable through normal team endpoints.
+model TeamMember {
+  id                  String           @id @default(cuid())
+  team_id             String
+  user_id             String
+  invited_by_user_id  String
+  status              TeamMemberStatus @default(PENDING)
+  role                TeamMemberRole   @default(MEMBER)
+  created_at          DateTime         @default(now())
+  updated_at          DateTime         @updatedAt
+
+  team       Team @relation(fields: [team_id], references: [id], onDelete: Cascade)
+  user       User @relation("TeamMemberUser", fields: [user_id], references: [id], onDelete: Cascade)
+  invited_by User @relation("TeamMemberInviter", fields: [invited_by_user_id], references: [id], onDelete: Cascade)
+
+  // One active membership record per (team, user). Re-invites use upsert.
+  @@unique([team_id, user_id])
+  @@index([team_id])
   @@index([user_id])
 }

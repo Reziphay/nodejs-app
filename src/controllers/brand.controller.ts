@@ -254,47 +254,76 @@ export const createBrand = async (
       return;
     }
 
-    const brand = await prisma.brand.create({
-      data: {
-        name: body.name,
-        description: body.description,
-        owner_id: userId,
-        logo_media_id: body.logo_media_id ?? null,
-        categories:
-          body.categoryIds && body.categoryIds.length > 0
-            ? { connect: body.categoryIds.map((id) => ({ id })) }
-            : undefined,
-        gallery:
-          body.gallery_media_ids && body.gallery_media_ids.length > 0
-            ? {
-                create: body.gallery_media_ids.map((mediaId, index) => ({
-                  media_id: mediaId,
-                  order: index,
-                })),
-              }
-            : undefined,
-        branches:
-          body.branches && body.branches.length > 0
-            ? {
-                create: body.branches.map((branch) => ({
-                  name: branch.name,
-                  description: branch.description,
-                  address1: branch.address1,
-                  address2: branch.address2,
-                  phone: branch.phone,
-                  email: branch.email,
-                  is_24_7: branch.is_24_7 ?? false,
-                  opening: branch.is_24_7 ? null : (branch.opening ?? null),
-                  closing: branch.is_24_7 ? null : (branch.closing ?? null),
-                  breaks:
-                    branch.breaks && branch.breaks.length > 0
-                      ? { create: branch.breaks.map((item) => ({ start: item.start, end: item.end })) }
-                      : undefined,
-                })),
-              }
-            : undefined,
-      },
-      select: brandSelect,
+    const brand = await prisma.$transaction(async (tx) => {
+      const created = await tx.brand.create({
+        data: {
+          name: body.name,
+          description: body.description,
+          owner_id: userId,
+          logo_media_id: body.logo_media_id ?? null,
+          categories:
+            body.categoryIds && body.categoryIds.length > 0
+              ? { connect: body.categoryIds.map((id) => ({ id })) }
+              : undefined,
+          gallery:
+            body.gallery_media_ids && body.gallery_media_ids.length > 0
+              ? {
+                  create: body.gallery_media_ids.map((mediaId, index) => ({
+                    media_id: mediaId,
+                    order: index,
+                  })),
+                }
+              : undefined,
+          branches:
+            body.branches && body.branches.length > 0
+              ? {
+                  create: body.branches.map((branch) => ({
+                    name: branch.name,
+                    description: branch.description,
+                    address1: branch.address1,
+                    address2: branch.address2,
+                    phone: branch.phone,
+                    email: branch.email,
+                    is_24_7: branch.is_24_7 ?? false,
+                    opening: branch.is_24_7 ? null : (branch.opening ?? null),
+                    closing: branch.is_24_7 ? null : (branch.closing ?? null),
+                    breaks:
+                      branch.breaks && branch.breaks.length > 0
+                        ? { create: branch.breaks.map((item) => ({ start: item.start, end: item.end })) }
+                        : undefined,
+                  })),
+                }
+              : undefined,
+        },
+        select: { id: true },
+      });
+
+      // Auto-create a Team + OWNER membership for each branch created above
+      if (body.branches && body.branches.length > 0) {
+        const newBranches = await tx.branch.findMany({
+          where: { brand_id: created.id },
+          select: { id: true },
+        });
+
+        for (const branch of newBranches) {
+          await tx.team.create({
+            data: {
+              branch_id: branch.id,
+              created_by_user_id: userId,
+              members: {
+                create: {
+                  user_id: userId,
+                  invited_by_user_id: userId,
+                  role: 'OWNER',
+                  status: 'ACCEPTED',
+                },
+              },
+            },
+          });
+        }
+      }
+
+      return tx.brand.findUniqueOrThrow({ where: { id: created.id }, select: brandSelect });
     });
 
     sendSuccess({ res, status: 201, message: 'brand.created', data: { brand: mapBrand(brand as BrandRaw, userId) } });
@@ -978,24 +1007,44 @@ export const addBranch = async (
 
     const body = req.body as CreateBranchInput;
 
-    const branch = await prisma.branch.create({
-      data: {
-        brand_id: brandId,
-        name: body.name,
-        description: body.description,
-        address1: body.address1,
-        address2: body.address2,
-        phone: body.phone,
-        email: body.email,
-        is_24_7: body.is_24_7 ?? false,
-        opening: body.is_24_7 ? null : (body.opening ?? null),
-        closing: body.is_24_7 ? null : (body.closing ?? null),
-        breaks:
-          body.breaks && body.breaks.length > 0
-            ? { create: body.breaks.map((b) => ({ start: b.start, end: b.end })) }
-            : undefined,
-      },
-      select: branchSelect,
+    const branch = await prisma.$transaction(async (tx) => {
+      const newBranch = await tx.branch.create({
+        data: {
+          brand_id: brandId,
+          name: body.name,
+          description: body.description,
+          address1: body.address1,
+          address2: body.address2,
+          phone: body.phone,
+          email: body.email,
+          is_24_7: body.is_24_7 ?? false,
+          opening: body.is_24_7 ? null : (body.opening ?? null),
+          closing: body.is_24_7 ? null : (body.closing ?? null),
+          breaks:
+            body.breaks && body.breaks.length > 0
+              ? { create: body.breaks.map((b) => ({ start: b.start, end: b.end })) }
+              : undefined,
+        },
+        select: branchSelect,
+      });
+
+      // Auto-create Team + OWNER membership for the new branch
+      await tx.team.create({
+        data: {
+          branch_id: newBranch.id,
+          created_by_user_id: userId,
+          members: {
+            create: {
+              user_id: userId,
+              invited_by_user_id: userId,
+              role: 'OWNER',
+              status: 'ACCEPTED',
+            },
+          },
+        },
+      });
+
+      return newBranch;
     });
 
     sendSuccess({ res, status: 201, message: 'branch.created', data: { branch } });
