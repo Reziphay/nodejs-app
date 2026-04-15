@@ -112,6 +112,8 @@ export const getTeamWorkspace = async (
             is_24_7: true,
             opening: true,
             closing: true,
+            cover_media_id: true,
+            cover_media: { select: { storage_path: true } },
             created_at: true,
             team: {
               select: {
@@ -145,6 +147,8 @@ export const getTeamWorkspace = async (
         return {
           branch_id: branch.id,
           branch_name: branch.name,
+          cover_media_id: branch.cover_media_id ?? null,
+          cover_url: branch.cover_media ? buildFileUrl(branch.cover_media.storage_path) : null,
           address: {
             address1: branch.address1,
             address2: branch.address2 ?? null,
@@ -210,6 +214,8 @@ export const getBranchTeam = async (
         is_24_7: true,
         opening: true,
         closing: true,
+        cover_media_id: true,
+        cover_media: { select: { storage_path: true } },
         team: {
           select: {
             id: true,
@@ -238,6 +244,8 @@ export const getBranchTeam = async (
           team_id: branch.team?.id ?? null,
           branch_id: branch.id,
           branch_name: branch.name,
+          cover_media_id: branch.cover_media_id ?? null,
+          cover_url: branch.cover_media ? buildFileUrl(branch.cover_media.storage_path) : null,
           address: { address1: branch.address1, address2: branch.address2 ?? null },
           availability: branch.is_24_7
             ? { is_24_7: true, opening: null, closing: null }

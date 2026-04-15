@@ -30,6 +30,7 @@ enum TeamMemberRole {
 enum MediaKind {
   avatar
   document
+  branch_cover
   other
 }
 
@@ -88,6 +89,7 @@ model Media {
   avatar_for    User[]         @relation("UserAvatar")
   brand_logo    Brand[]        @relation("BrandLogo")
   brand_gallery BrandGallery[] @relation("BrandGallery")
+  branch_covers Branch[]       @relation("BranchCover")
 
   @@index([owner_id])
 }
@@ -149,23 +151,25 @@ model BrandGallery {
 }
 
 model Branch {
-  id          String   @id @default(cuid())
-  brand_id    String
-  name        String
-  description String?
-  address1    String
-  address2    String?
-  phone       String?
-  email       String?
-  is_24_7     Boolean  @default(false)
-  opening     String?
-  closing     String?
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
+  id             String   @id @default(cuid())
+  brand_id       String
+  name           String
+  description    String?
+  address1       String
+  address2       String?
+  phone          String?
+  email          String?
+  is_24_7        Boolean  @default(false)
+  opening        String?
+  closing        String?
+  cover_media_id String?
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
 
-  brand  Brand         @relation(fields: [brand_id], references: [id], onDelete: Cascade)
-  breaks BranchBreak[]
-  team   Team?         @relation("BranchTeam")
+  brand       Brand         @relation(fields: [brand_id], references: [id], onDelete: Cascade)
+  breaks      BranchBreak[]
+  team        Team?         @relation("BranchTeam")
+  cover_media Media?        @relation("BranchCover", fields: [cover_media_id], references: [id], onDelete: SetNull)
 
   @@index([brand_id])
 }

@@ -94,7 +94,9 @@ export const uploadBrandMedia = async (
 
     const usageParam = req.body['usage'];
     const usage: BrandMediaUsage | undefined =
-      usageParam === 'logo' || usageParam === 'gallery' ? usageParam : undefined;
+      usageParam === 'logo' || usageParam === 'gallery' || usageParam === 'branch_cover'
+        ? (usageParam as BrandMediaUsage)
+        : undefined;
 
     const validated = await validateAndProcessImage(req.file, usage);
 
@@ -102,13 +104,22 @@ export const uploadBrandMedia = async (
     const storagePath = buildStoragePath(userId, 'webp');
     await writeFileToDisk(storagePath, validated.buffer);
 
+    // Map the upload usage to the MediaKind stored in the DB so queries can
+    // filter by kind later (e.g. "all branch cover uploads for this user").
+    const kindMap = {
+      logo: 'other',
+      gallery: 'other',
+      branch_cover: 'branch_cover',
+    } as const;
+    const kind = usage ? kindMap[usage] : 'other';
+
     const media = await prisma.media.create({
       data: {
         name: req.file.originalname,
         format: validated.format,
         mime_type: validated.mimeType,
         size: validated.size,
-        kind: 'other',
+        kind,
         storage_path: storagePath,
         checksum: validated.checksum,
         width: validated.width,
