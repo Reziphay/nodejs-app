@@ -11,15 +11,16 @@ export const updateMeSchema = z.object({
       return age >= 13;
     }, 'Must be at least 13 years old'),
   country: z.string().min(2).max(100).trim(),
-  country_prefix: z
-    .string()
-    .regex(/^\+\d{1,4}$/, 'Country prefix must be like +994 or +1')
-    .nullable(),
   email: z.string().email('Invalid email address').toLowerCase().trim(),
+  // Full E.164 format: '+' followed by 7–15 digits (e.g. "+9941234567").
+  // The frontend combines the country prefix and local number before sending;
+  // the backend stores this value directly without any further manipulation.
+  // Pass null to remove the phone number.
   phone: z
     .string()
-    .regex(/^\d{7,15}$/, 'Phone must be 7-15 digits')
-    .nullable(),
+    .regex(/^\+\d{7,15}$/, 'Phone must be in E.164 format, e.g. +9941234567')
+    .nullable()
+    .optional(),
 });
 
 export type UpdateMeInput = z.infer<typeof updateMeSchema>;

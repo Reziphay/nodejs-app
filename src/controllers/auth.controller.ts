@@ -221,9 +221,8 @@ export const me = async (
         first_name: true,
         last_name: true,
         birthday: true,
-        phone: true,
+        phone: true,      // full E.164, e.g. "+9941234567"
         country: true,
-        country_prefix: true,
         email: true,
         type: true,
         phone_verified: true,
