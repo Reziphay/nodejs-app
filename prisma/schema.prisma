@@ -61,9 +61,11 @@ model User {
   received_transfers   BrandTransfer[] @relation("BrandTransferRecipient")
   brand_ratings        BrandRating[]
   notifications        Notification[]
-  teams_created        Team[]          @relation("TeamCreator")
-  team_memberships     TeamMember[]    @relation("TeamMemberUser")
-  invitations_sent     TeamMember[]    @relation("TeamMemberInviter")
+  teams_created             Team[]                       @relation("TeamCreator")
+  team_memberships          TeamMember[]                 @relation("TeamMemberUser")
+  invitations_sent          TeamMember[]                 @relation("TeamMemberInviter")
+  feed_dismissals           NotificationFeedDismissal[]
+  feed_state                NotificationFeedState?
 
   avatar_media Media? @relation("UserAvatar", fields: [avatar_media_id], references: [id], onDelete: SetNull)
 
@@ -218,6 +220,43 @@ model BrandRating {
   @@unique([brand_id, user_id])
   @@index([brand_id])
   @@index([user_id])
+}
+
+// ─── Notification Feed ───────────────────────────────────────────────────────
+
+enum NotificationFeedSourceType {
+  notification
+  team_invitation
+  incoming_transfer
+  outgoing_transfer
+}
+
+// Tracks individual items the user has dismissed from the feed.
+// Dismissal is a visibility-only action — it does NOT reject/cancel the
+// underlying business record.
+model NotificationFeedDismissal {
+  id           String                     @id @default(cuid())
+  user_id      String
+  source_type  NotificationFeedSourceType
+  source_id    String
+  dismissed_at DateTime                   @default(now())
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, source_type, source_id])
+  @@index([user_id])
+}
+
+// One row per user. cleared_before is a timestamp acting as a watermark:
+// any feed item created before this timestamp is hidden (clear-all semantics).
+// Clearing does NOT delete business records.
+model NotificationFeedState {
+  id             String    @id @default(cuid())
+  user_id        String    @unique
+  cleared_before DateTime?
+  updated_at     DateTime  @updatedAt
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 }
 
 // ─── Notifications ───────────────────────────────────────────────────────────

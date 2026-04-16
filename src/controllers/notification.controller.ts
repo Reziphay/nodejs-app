@@ -2,6 +2,116 @@ import { Request, Response, NextFunction } from 'express';
 import prisma from '../lib/prisma';
 import { sendSuccess } from '../utils/response';
 import { AppError } from '../middlewares/error.middleware';
+import { buildFeed } from '../services/notification-feed.service';
+import { NotificationFeedSourceType } from '../generated/prisma/client';
+
+// ─── Notification Feed ────────────────────────────────────────────────────────
+
+const VALID_SOURCE_TYPES = new Set<NotificationFeedSourceType>([
+  'notification',
+  'team_invitation',
+  'incoming_transfer',
+  'outgoing_transfer',
+]);
+
+/**
+ * GET /notifications/feed
+ * Returns the unified notification feed for the authenticated user.
+ * Applies cleared_before watermark and per-item dismissal filters.
+ */
+export const getFeed = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const userId = req.user.sub;
+    const result = await buildFeed(userId);
+
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'notification.feed',
+      data: result,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * DELETE /notifications/feed/items/:sourceType/:sourceId
+ * Dismisses a single feed item for the authenticated user (visibility only).
+ * Does NOT reject invitations, cancel transfers, or delete notifications.
+ */
+export const dismissFeedItem = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const userId = req.user.sub;
+    const sourceType = req.params['sourceType'] as string;
+    const sourceId = req.params['sourceId'] as string;
+
+    if (!VALID_SOURCE_TYPES.has(sourceType as NotificationFeedSourceType)) {
+      const err: AppError = new Error();
+      err.statusCode = 400;
+      err.messageKey = 'notification.invalid_source_type';
+      return next(err);
+    }
+
+    // Upsert — calling dismiss twice is idempotent
+    await prisma.notificationFeedDismissal.upsert({
+      where: {
+        user_id_source_type_source_id: {
+          user_id: userId,
+          source_type: sourceType as NotificationFeedSourceType,
+          source_id: sourceId,
+        },
+      },
+      create: {
+        user_id: userId,
+        source_type: sourceType as NotificationFeedSourceType,
+        source_id: sourceId,
+      },
+      update: { dismissed_at: new Date() },
+    });
+
+    sendSuccess({ res, status: 200, message: 'notification.dismissed' });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * POST /notifications/feed/clear
+ * Sets cleared_before = now() so all current feed items are hidden.
+ * Future items (created after this timestamp) will still appear.
+ * Does NOT delete any business records.
+ */
+export const clearFeed = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const userId = req.user.sub;
+    const now = new Date();
+
+    await prisma.notificationFeedState.upsert({
+      where: { user_id: userId },
+      create: { user_id: userId, cleared_before: now },
+      update: { cleared_before: now },
+    });
+
+    sendSuccess({ res, status: 200, message: 'notification.feed_cleared' });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─── Legacy notification endpoints ───────────────────────────────────────────
 
 /**
  * GET /notifications
