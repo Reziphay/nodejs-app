@@ -37,8 +37,13 @@ model User {
   created_at  DateTime @default(now())
   updated_at  DateTime @updatedAt
 
-  refresh_tokens RefreshToken[]
-  media          Media[]
+  refresh_tokens       RefreshToken[]
+  media                Media[]
+  brands               Brand[]
+  brand_transfers      BrandTransfer[] @relation("BrandTransferRequester")
+  received_transfers   BrandTransfer[] @relation("BrandTransferRecipient")
+  brand_ratings        BrandRating[]
+  notifications        Notification[]
 
   avatar_media Media? @relation("UserAvatar", fields: [avatar_media_id], references: [id], onDelete: SetNull)
 
@@ -56,14 +61,155 @@ model Media {
   checksum     String
   is_public    Boolean   @default(true)
   owner_id     String
+  width        Int?
+  height       Int?
   upload_date  DateTime  @default(now())
   changes_date DateTime  @updatedAt
 
   owner User @relation(fields: [owner_id], references: [id], onDelete: Cascade)
 
-  avatar_for User[] @relation("UserAvatar")
+  avatar_for    User[]         @relation("UserAvatar")
+  brand_logo    Brand[]        @relation("BrandLogo")
+  brand_gallery BrandGallery[] @relation("BrandGallery")
 
   @@index([owner_id])
+}
+
+// ─── Brand models ────────────────────────────────────────────────────────────
+
+enum BrandStatus {
+  PENDING
+  ACTIVE
+  REJECTED
+  CLOSED
+}
+
+enum BrandTransferStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELLED
+}
+
+model BrandCategory {
+  id     String  @id @default(cuid())
+  name   String  @unique
+  brands Brand[]
+}
+
+model Brand {
+  id            String      @id @default(cuid())
+  name          String
+  description   String?
+  status        BrandStatus @default(PENDING)
+  owner_id      String
+  logo_media_id String?
+  created_at    DateTime    @default(now())
+  updated_at    DateTime    @updatedAt
+
+  owner      User           @relation(fields: [owner_id], references: [id], onDelete: Cascade)
+  logo_media Media?         @relation("BrandLogo", fields: [logo_media_id], references: [id], onDelete: SetNull)
+  gallery    BrandGallery[]
+  branches   Branch[]
+  categories BrandCategory[]
+  ratings    BrandRating[]
+  transfers  BrandTransfer[]
+
+  @@index([owner_id])
+  @@index([status])
+}
+
+model BrandGallery {
+  id       String @id @default(cuid())
+  brand_id String
+  media_id String
+  order    Int    @default(0)
+
+  brand Brand @relation(fields: [brand_id], references: [id], onDelete: Cascade)
+  media Media @relation("BrandGallery", fields: [media_id], references: [id], onDelete: Cascade)
+
+  @@index([brand_id])
+}
+
+model Branch {
+  id          String   @id @default(cuid())
+  brand_id    String
+  name        String
+  description String?
+  address1    String
+  address2    String?
+  phone       String?
+  email       String?
+  is_24_7     Boolean  @default(false)
+  opening     String?
+  closing     String?
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+
+  brand  Brand         @relation(fields: [brand_id], references: [id], onDelete: Cascade)
+  breaks BranchBreak[]
+
+  @@index([brand_id])
+}
+
+model BranchBreak {
+  id        String @id @default(cuid())
+  branch_id String
+  start     String
+  end       String
+
+  branch Branch @relation(fields: [branch_id], references: [id], onDelete: Cascade)
+}
+
+model BrandTransfer {
+  id             String              @id @default(cuid())
+  brand_id       String
+  from_user_id   String
+  to_user_id     String
+  status         BrandTransferStatus @default(PENDING)
+  created_at     DateTime            @default(now())
+  updated_at     DateTime            @updatedAt
+
+  brand      Brand @relation(fields: [brand_id], references: [id], onDelete: Cascade)
+  from_user  User  @relation("BrandTransferRequester", fields: [from_user_id], references: [id], onDelete: Cascade)
+  to_user    User  @relation("BrandTransferRecipient", fields: [to_user_id], references: [id], onDelete: Cascade)
+
+  @@index([brand_id])
+  @@index([from_user_id])
+  @@index([to_user_id])
+}
+
+model BrandRating {
+  id         String   @id @default(cuid())
+  brand_id   String
+  user_id    String
+  value      Int
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  brand Brand @relation(fields: [brand_id], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([brand_id, user_id])
+  @@index([brand_id])
+  @@index([user_id])
+}
+
+// ─── Notifications ───────────────────────────────────────────────────────────
+
+model Notification {
+  id         String   @id @default(cuid())
+  user_id    String
+  type       String
+  title      String
+  body       String
+  data       Json?
+  read       Boolean  @default(false)
+  created_at DateTime @default(now())
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
 }
 
 model RefreshToken {

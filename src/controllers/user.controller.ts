@@ -8,6 +8,22 @@ import { buildFileUrl } from '../services/storage.service';
 const resolveAvatarUrl = (storagePath: string | null | undefined): string | null =>
   storagePath ? buildFileUrl(storagePath) : null;
 
+function normalizePhoneQuery(value: string): string {
+  return value.replace(/\D/g, '');
+}
+
+function requireUso(req: Request, next: NextFunction): boolean {
+  if (req.user.type !== 'uso') {
+    const err: AppError = new Error();
+    err.statusCode = 403;
+    err.messageKey = 'errors.forbidden';
+    next(err);
+    return false;
+  }
+
+  return true;
+}
+
 const privateUserSelect = {
   id: true,
   first_name: true,
@@ -162,6 +178,118 @@ export const updateMe = async (
           ...rest,
           avatar_url: resolveAvatarUrl(avatar_media?.storage_path),
         },
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const searchUsoUsers = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    if (!requireUso(req, next)) return;
+
+    const query = ((req.query['q'] as string) ?? '').trim();
+    const excludeId = req.user.sub;
+    const normalizedPhoneQuery = normalizePhoneQuery(query);
+    const canSearchByText = query.length >= 2 && /[^\d\s()+-]/.test(query);
+    const canSearchByPhone = normalizedPhoneQuery.length >= 4;
+
+    if (!canSearchByText && !canSearchByPhone) {
+      sendSuccess({ res, status: 200, message: 'user.search', data: { users: [] } });
+      return;
+    }
+
+    const usersById = new Map<
+      string,
+      {
+        id: string;
+        first_name: string;
+        last_name: string;
+        email: string;
+        avatar_url: string | null;
+      }
+    >();
+
+    if (canSearchByText) {
+      const textUsers = await prisma.user.findMany({
+        where: {
+          type: 'uso',
+          id: { not: excludeId },
+          OR: [
+            { first_name: { contains: query, mode: 'insensitive' } },
+            { last_name: { contains: query, mode: 'insensitive' } },
+            { email: { contains: query, mode: 'insensitive' } },
+          ],
+        },
+        select: {
+          id: true,
+          first_name: true,
+          last_name: true,
+          email: true,
+          avatar_media: { select: { storage_path: true } },
+        },
+        take: 10,
+      });
+
+      for (const user of textUsers) {
+        usersById.set(user.id, {
+          id: user.id,
+          first_name: user.first_name,
+          last_name: user.last_name,
+          email: user.email,
+          avatar_url: resolveAvatarUrl(user.avatar_media?.storage_path),
+        });
+      }
+    }
+
+    if (canSearchByPhone && usersById.size < 10) {
+      const phoneUsers = await prisma.$queryRaw<
+        {
+          id: string;
+          first_name: string;
+          last_name: string;
+          email: string;
+          avatar_storage_path: string | null;
+        }[]
+      >`
+        SELECT
+          u.id,
+          u.first_name,
+          u.last_name,
+          u.email,
+          m.storage_path AS avatar_storage_path
+        FROM "User" u
+        LEFT JOIN "Media" m ON m.id = u.avatar_media_id
+        WHERE u.type = CAST('uso' AS "UserType")
+          AND u.id <> ${excludeId}
+          AND regexp_replace(COALESCE(u.country_prefix, '') || COALESCE(u.phone, ''), '[^0-9]', '', 'g')
+            LIKE ${`%${normalizedPhoneQuery}%`}
+        ORDER BY u.first_name ASC, u.last_name ASC
+        LIMIT ${10 - usersById.size}
+      `;
+
+      for (const user of phoneUsers) {
+        usersById.set(user.id, {
+          id: user.id,
+          first_name: user.first_name,
+          last_name: user.last_name,
+          email: user.email,
+          avatar_url: resolveAvatarUrl(user.avatar_storage_path),
+        });
+      }
+    }
+
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'user.search',
+      data: {
+        users: Array.from(usersById.values()).slice(0, 10),
       },
     });
   } catch (err) {

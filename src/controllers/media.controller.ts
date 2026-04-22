@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import prisma from '../lib/prisma';
 import { sendSuccess } from '../utils/response';
 import { AppError } from '../middlewares/error.middleware';
-import { validateAndProcessImage, writeFileToDisk } from '../services/media.service';
+import { validateAndProcessImage, writeFileToDisk, type BrandMediaUsage } from '../services/media.service';
 import {
   buildStoragePath,
   ensureUserStorageDir,
@@ -52,6 +52,8 @@ export const uploadAvatar = async (
         kind: 'avatar',
         storage_path: storagePath,
         checksum: validated.checksum,
+        width: validated.width,
+        height: validated.height,
         is_public: true,
         owner_id: userId,
       },
@@ -69,6 +71,58 @@ export const uploadAvatar = async (
       status: 201,
       message: 'media.avatar_upload_success',
       data: { avatar_url: avatarUrl },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const uploadBrandMedia = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const userId = req.user.sub;
+
+    if (!req.file) {
+      const err: AppError = new Error();
+      err.statusCode = 400;
+      err.messageKey = 'media.no_file_provided';
+      return next(err);
+    }
+
+    const usageParam = req.body['usage'];
+    const usage: BrandMediaUsage | undefined =
+      usageParam === 'logo' || usageParam === 'gallery' ? usageParam : undefined;
+
+    const validated = await validateAndProcessImage(req.file, usage);
+
+    await ensureUserStorageDir(userId);
+    const storagePath = buildStoragePath(userId, 'webp');
+    await writeFileToDisk(storagePath, validated.buffer);
+
+    const media = await prisma.media.create({
+      data: {
+        name: req.file.originalname,
+        format: validated.format,
+        mime_type: validated.mimeType,
+        size: validated.size,
+        kind: 'other',
+        storage_path: storagePath,
+        checksum: validated.checksum,
+        width: validated.width,
+        height: validated.height,
+        is_public: true,
+        owner_id: userId,
+      },
+    });
+
+    sendSuccess({
+      res,
+      status: 201,
+      message: 'media.brand_upload_success',
+      data: { media_id: media.id, url: buildFileUrl(storagePath) },
     });
   } catch (err) {
     next(err);
