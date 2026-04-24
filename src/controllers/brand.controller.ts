@@ -206,10 +206,88 @@ const branchSelect = {
   is_24_7: true,
   opening: true,
   closing: true,
+  cover_media_id: true,
   created_at: true,
   updated_at: true,
   breaks: { select: { id: true, start: true, end: true } },
+  cover_media: { select: { id: true, storage_path: true } },
 } as const;
+
+type BranchRaw = {
+  id: string;
+  brand_id: string;
+  name: string;
+  description: string | null;
+  address1: string;
+  address2: string | null;
+  phone: string | null;
+  email: string | null;
+  is_24_7: boolean;
+  opening: string | null;
+  closing: string | null;
+  cover_media_id: string | null;
+  created_at: Date;
+  updated_at: Date;
+  breaks: { id: string; start: string; end: string }[];
+  cover_media: { id: string; storage_path: string } | null;
+};
+
+function mapBranch(raw: BranchRaw) {
+  return {
+    id: raw.id,
+    brand_id: raw.brand_id,
+    name: raw.name,
+    description: raw.description ?? undefined,
+    address1: raw.address1,
+    address2: raw.address2 ?? undefined,
+    phone: raw.phone ?? undefined,
+    email: raw.email ?? undefined,
+    is_24_7: raw.is_24_7,
+    opening: raw.opening ?? undefined,
+    closing: raw.closing ?? undefined,
+    cover_media_id: raw.cover_media_id ?? null,
+    cover_url: raw.cover_media ? buildFileUrl(raw.cover_media.storage_path) : null,
+    breaks: raw.breaks,
+    created_at: raw.created_at.toISOString(),
+    updated_at: raw.updated_at.toISOString(),
+  };
+}
+
+async function validateBranchCoverMediaOwnershipAndRatio(
+  coverMediaId: string | null | undefined,
+  userId: string,
+  next: NextFunction,
+): Promise<boolean> {
+  if (!coverMediaId) return true;
+
+  const media = await prisma.media.findUnique({
+    where: { id: coverMediaId },
+    select: { owner_id: true, width: true, height: true },
+  });
+
+  if (!media || media.owner_id !== userId) {
+    const err: AppError = new Error();
+    err.statusCode = 403;
+    err.messageKey = 'media.not_owned';
+    next(err);
+    return false;
+  }
+
+  const hasValidRatio = (w: number | null, h: number | null) => {
+    if (!w || !h) return false;
+    return Math.abs(w / h - 16 / 9) <= 0.02;
+  };
+
+  if (!hasValidRatio(media.width, media.height)) {
+    const err: AppError = new Error();
+    err.statusCode = 400;
+    err.messageKey = 'media.invalid_cover_ratio';
+    next(err);
+    return false;
+  }
+
+  return true;
+}
 
 // ─── Brand CRUD ───────────────────────────────────────────────────────────────
 
@@ -236,12 +314,22 @@ export const createBrand = async (
 
     const body = req.body as CreateBrandInput;
 
-    // Validate media ownership
+    // Validate media ownership — brand logo + gallery + all branch cover images
+    const branchCoverIds = (body.branches ?? [])
+      .map((b) => b.cover_media_id)
+      .filter((id): id is string => typeof id === 'string');
+
     const allMediaIds = [
       ...(body.logo_media_id ? [body.logo_media_id] : []),
       ...(body.gallery_media_ids ?? []),
+      ...branchCoverIds,
     ];
     if (!(await validateMediaOwnership(allMediaIds, userId, next))) return;
+
+    // Validate branch cover aspect ratios
+    for (const coverId of branchCoverIds) {
+      if (!(await validateBranchCoverMediaOwnershipAndRatio(coverId, userId, next))) return;
+    }
     if (
       !(await validateBrandMediaAspectRatios(
         {
@@ -254,47 +342,77 @@ export const createBrand = async (
       return;
     }
 
-    const brand = await prisma.brand.create({
-      data: {
-        name: body.name,
-        description: body.description,
-        owner_id: userId,
-        logo_media_id: body.logo_media_id ?? null,
-        categories:
-          body.categoryIds && body.categoryIds.length > 0
-            ? { connect: body.categoryIds.map((id) => ({ id })) }
-            : undefined,
-        gallery:
-          body.gallery_media_ids && body.gallery_media_ids.length > 0
-            ? {
-                create: body.gallery_media_ids.map((mediaId, index) => ({
-                  media_id: mediaId,
-                  order: index,
-                })),
-              }
-            : undefined,
-        branches:
-          body.branches && body.branches.length > 0
-            ? {
-                create: body.branches.map((branch) => ({
-                  name: branch.name,
-                  description: branch.description,
-                  address1: branch.address1,
-                  address2: branch.address2,
-                  phone: branch.phone,
-                  email: branch.email,
-                  is_24_7: branch.is_24_7 ?? false,
-                  opening: branch.is_24_7 ? null : (branch.opening ?? null),
-                  closing: branch.is_24_7 ? null : (branch.closing ?? null),
-                  breaks:
-                    branch.breaks && branch.breaks.length > 0
-                      ? { create: branch.breaks.map((item) => ({ start: item.start, end: item.end })) }
-                      : undefined,
-                })),
-              }
-            : undefined,
-      },
-      select: brandSelect,
+    const brand = await prisma.$transaction(async (tx) => {
+      const created = await tx.brand.create({
+        data: {
+          name: body.name,
+          description: body.description,
+          owner_id: userId,
+          logo_media_id: body.logo_media_id ?? null,
+          categories:
+            body.categoryIds && body.categoryIds.length > 0
+              ? { connect: body.categoryIds.map((id) => ({ id })) }
+              : undefined,
+          gallery:
+            body.gallery_media_ids && body.gallery_media_ids.length > 0
+              ? {
+                  create: body.gallery_media_ids.map((mediaId, index) => ({
+                    media_id: mediaId,
+                    order: index,
+                  })),
+                }
+              : undefined,
+          branches:
+            body.branches && body.branches.length > 0
+              ? {
+                  create: body.branches.map((branch) => ({
+                    name: branch.name,
+                    description: branch.description,
+                    address1: branch.address1,
+                    address2: branch.address2,
+                    phone: branch.phone,
+                    email: branch.email,
+                    is_24_7: branch.is_24_7 ?? false,
+                    opening: branch.is_24_7 ? null : (branch.opening ?? null),
+                    closing: branch.is_24_7 ? null : (branch.closing ?? null),
+                    cover_media_id: branch.cover_media_id ?? null,
+                    breaks:
+                      branch.breaks && branch.breaks.length > 0
+                        ? { create: branch.breaks.map((item) => ({ start: item.start, end: item.end })) }
+                        : undefined,
+                  })),
+                }
+              : undefined,
+        },
+        select: { id: true },
+      });
+
+      // Auto-create a Team + OWNER membership for each branch created above
+      if (body.branches && body.branches.length > 0) {
+        const newBranches = await tx.branch.findMany({
+          where: { brand_id: created.id },
+          select: { id: true },
+        });
+
+        for (const branch of newBranches) {
+          await tx.team.create({
+            data: {
+              branch_id: branch.id,
+              created_by_user_id: userId,
+              members: {
+                create: {
+                  user_id: userId,
+                  invited_by_user_id: userId,
+                  role: 'OWNER',
+                  status: 'ACCEPTED',
+                },
+              },
+            },
+          });
+        }
+      }
+
+      return tx.brand.findUniqueOrThrow({ where: { id: created.id }, select: brandSelect });
     });
 
     sendSuccess({ res, status: 201, message: 'brand.created', data: { brand: mapBrand(brand as BrandRaw, userId) } });
@@ -356,7 +474,17 @@ export const getBrandById = async (
       }
     }
 
-    sendSuccess({ res, status: 200, message: 'brand.found', data: { brand: { ...mapBrand(brand as BrandRaw, req.user?.sub), branches: brand.branches } } });
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'brand.found',
+      data: {
+        brand: {
+          ...mapBrand(brand as BrandRaw, req.user?.sub),
+          branches: brand.branches.map((b) => mapBranch(b as BranchRaw)),
+        },
+      },
+    });
   } catch (err) {
     next(err);
   }
@@ -978,27 +1106,51 @@ export const addBranch = async (
 
     const body = req.body as CreateBranchInput;
 
-    const branch = await prisma.branch.create({
-      data: {
-        brand_id: brandId,
-        name: body.name,
-        description: body.description,
-        address1: body.address1,
-        address2: body.address2,
-        phone: body.phone,
-        email: body.email,
-        is_24_7: body.is_24_7 ?? false,
-        opening: body.is_24_7 ? null : (body.opening ?? null),
-        closing: body.is_24_7 ? null : (body.closing ?? null),
-        breaks:
-          body.breaks && body.breaks.length > 0
-            ? { create: body.breaks.map((b) => ({ start: b.start, end: b.end })) }
-            : undefined,
-      },
-      select: branchSelect,
+    // Validate branch cover ownership + aspect ratio before entering the transaction
+    if (!(await validateBranchCoverMediaOwnershipAndRatio(body.cover_media_id, userId, next))) return;
+
+    const branch = await prisma.$transaction(async (tx) => {
+      const newBranch = await tx.branch.create({
+        data: {
+          brand_id: brandId,
+          name: body.name,
+          description: body.description,
+          address1: body.address1,
+          address2: body.address2,
+          phone: body.phone,
+          email: body.email,
+          is_24_7: body.is_24_7 ?? false,
+          opening: body.is_24_7 ? null : (body.opening ?? null),
+          closing: body.is_24_7 ? null : (body.closing ?? null),
+          cover_media_id: body.cover_media_id ?? null,
+          breaks:
+            body.breaks && body.breaks.length > 0
+              ? { create: body.breaks.map((b) => ({ start: b.start, end: b.end })) }
+              : undefined,
+        },
+        select: branchSelect,
+      });
+
+      // Auto-create Team + OWNER membership for the new branch
+      await tx.team.create({
+        data: {
+          branch_id: newBranch.id,
+          created_by_user_id: userId,
+          members: {
+            create: {
+              user_id: userId,
+              invited_by_user_id: userId,
+              role: 'OWNER',
+              status: 'ACCEPTED',
+            },
+          },
+        },
+      });
+
+      return newBranch;
     });
 
-    sendSuccess({ res, status: 201, message: 'branch.created', data: { branch } });
+    sendSuccess({ res, status: 201, message: 'branch.created', data: { branch: mapBranch(branch as BranchRaw) } });
   } catch (err) {
     next(err);
   }
@@ -1039,6 +1191,11 @@ export const updateBranch = async (
 
     const body = req.body as UpdateBranchInput;
 
+    // Validate branch cover ownership + ratio when cover_media_id is being changed
+    if (body.cover_media_id !== undefined) {
+      if (!(await validateBranchCoverMediaOwnershipAndRatio(body.cover_media_id, userId, next))) return;
+    }
+
     // If breaks are provided, replace them entirely
     if (body.breaks !== undefined) {
       await prisma.branchBreak.deleteMany({ where: { branch_id: branchId } });
@@ -1058,6 +1215,8 @@ export const updateBranch = async (
         ...(body.closing !== undefined && { closing: body.closing }),
         // Clear opening/closing when switching to 24/7
         ...(body.is_24_7 === true && { opening: null, closing: null }),
+        // cover_media_id: null removes the cover; a cuid sets a new one
+        ...(body.cover_media_id !== undefined && { cover_media_id: body.cover_media_id }),
         ...(body.breaks !== undefined &&
           body.breaks.length > 0 && {
             breaks: {
@@ -1068,7 +1227,7 @@ export const updateBranch = async (
       select: branchSelect,
     });
 
-    sendSuccess({ res, status: 200, message: 'branch.updated', data: { branch } });
+    sendSuccess({ res, status: 200, message: 'branch.updated', data: { branch: mapBranch(branch as BranchRaw) } });
   } catch (err) {
     next(err);
   }

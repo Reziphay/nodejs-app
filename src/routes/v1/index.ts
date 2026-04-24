@@ -5,6 +5,7 @@ import userRoute from './user.route';
 import mediaRoute from './media.route';
 import brandRoute from './brand.route';
 import notificationRoute from './notification.route';
+import teamRoute from './team.route';
 
 const router: Router = Router();
 
@@ -14,5 +15,6 @@ router.use('/users', userRoute);
 router.use('/users', mediaRoute);
 router.use('/', brandRoute);
 router.use('/notifications', notificationRoute);
+router.use('/', teamRoute);
 
 export default router;

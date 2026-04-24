@@ -21,6 +21,7 @@ export const createBranchSchema = z
     opening: z.string().regex(timeRegex, 'Opening must be HH:mm').optional(),
     closing: z.string().regex(timeRegex, 'Closing must be HH:mm').optional(),
     breaks: z.array(branchBreakSchema).optional().default([]),
+    cover_media_id: z.string().cuid('Invalid media id').nullable().optional(),
   })
   .refine(
     (data) => data.is_24_7 || (!!data.opening && !!data.closing),
@@ -41,6 +42,7 @@ export const updateBranchSchema = z
     opening: z.string().regex(timeRegex, 'Opening must be HH:mm').nullable().optional(),
     closing: z.string().regex(timeRegex, 'Closing must be HH:mm').nullable().optional(),
     breaks: z.array(branchBreakSchema).optional(),
+    cover_media_id: z.string().cuid('Invalid media id').nullable().optional(),
   })
   .refine(
     (data) => {

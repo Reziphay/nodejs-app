@@ -29,9 +29,8 @@ const privateUserSelect = {
   first_name: true,
   last_name: true,
   birthday: true,
-  phone: true,
+  phone: true,      // full E.164, e.g. "+9941234567"
   country: true,
-  country_prefix: true,
   email: true,
   type: true,
   phone_verified: true,
@@ -40,6 +39,7 @@ const privateUserSelect = {
   created_at: true,
   updated_at: true,
 } as const;
+
 
 export const getUserById = async (
   req: Request,
@@ -109,8 +109,13 @@ export const updateMe = async (
       return next(err);
     }
 
+    // body.phone is already a full E.164 string (e.g. "+9941234567") or null.
+    // The frontend combines the prefix and local number before sending; the
+    // backend stores the value directly — no further manipulation needed.
+    const newPhone = body.phone ?? null;
+
     const emailChanged = body.email !== current.email;
-    const phoneChanged = body.phone !== current.phone;
+    const phoneChanged = newPhone !== current.phone;
 
     if (emailChanged && current.email_verified) {
       const err: AppError = new Error();
@@ -139,9 +144,10 @@ export const updateMe = async (
       }
     }
 
-    if (body.phone) {
+    // Uniqueness check on the full E.164 number — not just the local part.
+    if (newPhone) {
       const phoneTaken = await prisma.user.findUnique({
-        where: { phone: body.phone },
+        where: { phone: newPhone },
         select: { id: true },
       });
       if (phoneTaken && phoneTaken.id !== userId) {
@@ -159,10 +165,10 @@ export const updateMe = async (
         last_name: body.last_name,
         birthday: new Date(body.birthday),
         country: body.country,
-        country_prefix: body.country_prefix,
         email: body.email,
-        phone: body.phone,
+        phone: newPhone,
         ...(emailChanged && { email_verified: false }),
+        ...(phoneChanged && { phone_verified: false }),
       },
       select: privateUserSelect,
     });
@@ -248,6 +254,9 @@ export const searchUsoUsers = async (
     }
 
     if (canSearchByPhone && usersById.size < 10) {
+      // phone now stores the full E.164 number (e.g. "+9941234567").
+      // Strip non-digits from the stored number before comparing so the user
+      // can search by digits only without worrying about the leading '+'.
       const phoneUsers = await prisma.$queryRaw<
         {
           id: string;
@@ -267,7 +276,7 @@ export const searchUsoUsers = async (
         LEFT JOIN "Media" m ON m.id = u.avatar_media_id
         WHERE u.type = CAST('uso' AS "UserType")
           AND u.id <> ${excludeId}
-          AND regexp_replace(COALESCE(u.country_prefix, '') || COALESCE(u.phone, ''), '[^0-9]', '', 'g')
+          AND regexp_replace(COALESCE(u.phone, ''), '[^0-9]', '', 'g')
             LIKE ${`%${normalizedPhoneQuery}%`}
         ORDER BY u.first_name ASC, u.last_name ASC
         LIMIT ${10 - usersById.size}

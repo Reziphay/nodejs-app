@@ -51,8 +51,63 @@ const upload = multer({
 
 const router: Router = Router();
 
-// ─── Brand media upload ───────────────────────────────────────────────────────
+// ─── Brand / branch media upload ─────────────────────────────────────────────
 
+/**
+ * @openapi
+ * /api/v1/brands/media:
+ *   post:
+ *     tags:
+ *       - Brands
+ *     summary: Upload a brand or branch image (USO only)
+ *     description: |
+ *       Upload an image for brand or branch use. Pass `usage` in the form body to
+ *       apply the correct aspect-ratio validation:
+ *       - `logo` — 1:1 square (brand logo)
+ *       - `gallery` — 16:9 landscape (brand gallery)
+ *       - `branch_cover` — 16:9 landscape (branch cover photo)
+ *       - omit — no ratio check (generic upload)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - file
+ *             properties:
+ *               file:
+ *                 type: string
+ *                 format: binary
+ *                 description: Image file (jpg, png, webp). Max 10 MB.
+ *               usage:
+ *                 type: string
+ *                 enum: [logo, gallery, branch_cover]
+ *                 description: Intended use — drives aspect-ratio validation.
+ *     responses:
+ *       201:
+ *         description: Media uploaded
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     media_id:
+ *                       type: string
+ *                     url:
+ *                       type: string
+ *       400:
+ *         description: Invalid aspect ratio for the given usage
+ *       413:
+ *         description: File too large
+ *       415:
+ *         description: Invalid file type
+ */
 router.post('/brands/media', authenticate, upload.single('file'), uploadBrandMedia);
 
 // ─── Categories (public) ──────────────────────────────────────────────────────

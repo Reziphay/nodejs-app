@@ -13,9 +13,24 @@ enum UserType {
   admin
 }
 
+// ─── Team enums ───────────────────────────────────────────────────────────────
+
+enum TeamMemberStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  REMOVED
+}
+
+enum TeamMemberRole {
+  OWNER
+  MEMBER
+}
+
 enum MediaKind {
   avatar
   document
+  branch_cover
   other
 }
 
@@ -24,9 +39,11 @@ model User {
   first_name       String
   last_name        String
   birthday         DateTime  @db.Date
+  // Full E.164 international number, e.g. "+9941234567". Prefix and local
+  // number are accepted separately from the frontend and combined server-side
+  // before storage so uniqueness is enforced on the complete international number.
   phone            String?   @unique
   country          String
-  country_prefix   String?
   email            String    @unique
   hashed_password  String
   type             UserType  @default(uso)
@@ -44,10 +61,16 @@ model User {
   received_transfers   BrandTransfer[] @relation("BrandTransferRecipient")
   brand_ratings        BrandRating[]
   notifications        Notification[]
+  teams_created             Team[]                       @relation("TeamCreator")
+  team_memberships          TeamMember[]                 @relation("TeamMemberUser")
+  invitations_sent          TeamMember[]                 @relation("TeamMemberInviter")
+  feed_dismissals           NotificationFeedDismissal[]
+  feed_state                NotificationFeedState?
 
   avatar_media Media? @relation("UserAvatar", fields: [avatar_media_id], references: [id], onDelete: SetNull)
 
   @@index([email])
+  @@index([phone])
 }
 
 model Media {
@@ -71,6 +94,7 @@ model Media {
   avatar_for    User[]         @relation("UserAvatar")
   brand_logo    Brand[]        @relation("BrandLogo")
   brand_gallery BrandGallery[] @relation("BrandGallery")
+  branch_covers Branch[]       @relation("BranchCover")
 
   @@index([owner_id])
 }
@@ -132,22 +156,25 @@ model BrandGallery {
 }
 
 model Branch {
-  id          String   @id @default(cuid())
-  brand_id    String
-  name        String
-  description String?
-  address1    String
-  address2    String?
-  phone       String?
-  email       String?
-  is_24_7     Boolean  @default(false)
-  opening     String?
-  closing     String?
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
+  id             String   @id @default(cuid())
+  brand_id       String
+  name           String
+  description    String?
+  address1       String
+  address2       String?
+  phone          String?
+  email          String?
+  is_24_7        Boolean  @default(false)
+  opening        String?
+  closing        String?
+  cover_media_id String?
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
 
-  brand  Brand         @relation(fields: [brand_id], references: [id], onDelete: Cascade)
-  breaks BranchBreak[]
+  brand       Brand         @relation(fields: [brand_id], references: [id], onDelete: Cascade)
+  breaks      BranchBreak[]
+  team        Team?         @relation("BranchTeam")
+  cover_media Media?        @relation("BranchCover", fields: [cover_media_id], references: [id], onDelete: SetNull)
 
   @@index([brand_id])
 }
@@ -195,6 +222,43 @@ model BrandRating {
   @@index([user_id])
 }
 
+// ─── Notification Feed ───────────────────────────────────────────────────────
+
+enum NotificationFeedSourceType {
+  notification
+  team_invitation
+  incoming_transfer
+  outgoing_transfer
+}
+
+// Tracks individual items the user has dismissed from the feed.
+// Dismissal is a visibility-only action — it does NOT reject/cancel the
+// underlying business record.
+model NotificationFeedDismissal {
+  id           String                     @id @default(cuid())
+  user_id      String
+  source_type  NotificationFeedSourceType
+  source_id    String
+  dismissed_at DateTime                   @default(now())
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, source_type, source_id])
+  @@index([user_id])
+}
+
+// One row per user. cleared_before is a timestamp acting as a watermark:
+// any feed item created before this timestamp is hidden (clear-all semantics).
+// Clearing does NOT delete business records.
+model NotificationFeedState {
+  id             String    @id @default(cuid())
+  user_id        String    @unique
+  cleared_before DateTime?
+  updated_at     DateTime  @updatedAt
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+}
+
 // ─── Notifications ───────────────────────────────────────────────────────────
 
 model Notification {
@@ -220,5 +284,46 @@ model RefreshToken {
   expires_at DateTime
   created_at DateTime @default(now())
 
+  @@index([user_id])
+}
+
+// ─── Team models ──────────────────────────────────────────────────────────────
+
+// One Team per Branch. Created automatically when a Branch is created.
+// The brand owner is automatically the first ACCEPTED OWNER member.
+model Team {
+  id                  String   @id @default(cuid())
+  branch_id           String   @unique
+  created_by_user_id  String
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+
+  branch   Branch       @relation("BranchTeam", fields: [branch_id], references: [id], onDelete: Cascade)
+  creator  User         @relation("TeamCreator", fields: [created_by_user_id], references: [id], onDelete: Cascade)
+  members  TeamMember[]
+
+  @@index([created_by_user_id])
+}
+
+// One row per (team, user) pair. Status tracks the invitation lifecycle.
+// Re-inviting a REJECTED/REMOVED user updates this same row (upsert pattern).
+// The OWNER row is immutable through normal team endpoints.
+model TeamMember {
+  id                  String           @id @default(cuid())
+  team_id             String
+  user_id             String
+  invited_by_user_id  String
+  status              TeamMemberStatus @default(PENDING)
+  role                TeamMemberRole   @default(MEMBER)
+  created_at          DateTime         @default(now())
+  updated_at          DateTime         @updatedAt
+
+  team       Team @relation(fields: [team_id], references: [id], onDelete: Cascade)
+  user       User @relation("TeamMemberUser", fields: [user_id], references: [id], onDelete: Cascade)
+  invited_by User @relation("TeamMemberInviter", fields: [invited_by_user_id], references: [id], onDelete: Cascade)
+
+  // One active membership record per (team, user). Re-invites use upsert.
+  @@unique([team_id, user_id])
+  @@index([team_id])
   @@index([user_id])
 }

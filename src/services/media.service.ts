@@ -8,7 +8,7 @@ const ALLOWED_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const MAX_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
 const ASPECT_RATIO_TOLERANCE = 0.02;
 
-export type BrandMediaUsage = 'logo' | 'gallery';
+export type BrandMediaUsage = 'logo' | 'gallery' | 'branch_cover';
 
 export interface ValidatedImage {
   buffer: Buffer;
@@ -27,16 +27,26 @@ function ensureAspectRatio(
 ) {
   if (!usage) return;
 
-  const expectedRatio = usage === 'logo' ? 1 : 16 / 9;
-  const actualRatio = width / height;
+  let expectedRatio: number;
+  let errorKey: string;
 
-  if (Math.abs(actualRatio - expectedRatio) <= ASPECT_RATIO_TOLERANCE) {
+  if (usage === 'logo') {
+    expectedRatio = 1;
+    errorKey = 'media.invalid_logo_ratio';
+  } else if (usage === 'gallery' || usage === 'branch_cover') {
+    // Both gallery images and branch cover photos must be 16:9 (wide landscape).
+    expectedRatio = 16 / 9;
+    errorKey = usage === 'branch_cover' ? 'media.invalid_cover_ratio' : 'media.invalid_gallery_ratio';
+  } else {
     return;
   }
 
+  const actualRatio = width / height;
+  if (Math.abs(actualRatio - expectedRatio) <= ASPECT_RATIO_TOLERANCE) return;
+
   const err: AppError = new Error();
   err.statusCode = 400;
-  err.messageKey = usage === 'logo' ? 'media.invalid_logo_ratio' : 'media.invalid_gallery_ratio';
+  err.messageKey = errorKey;
   throw err;
 }
 
