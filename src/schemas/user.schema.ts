@@ -21,6 +21,13 @@ export const updateMeSchema = z.object({
     .regex(/^\+\d{7,15}$/, 'Phone must be in E.164 format, e.g. +9941234567')
     .nullable()
     .optional(),
+  step_up_token: z.string().min(1).optional(),
 });
 
 export type UpdateMeInput = z.infer<typeof updateMeSchema>;
+
+export const deleteMeSchema = z.object({
+  step_up_token: z.string().min(1, 'Step-up token is required'),
+});
+
+export type DeleteMeInput = z.infer<typeof deleteMeSchema>;

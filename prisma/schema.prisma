@@ -34,6 +34,14 @@ enum MediaKind {
   other
 }
 
+enum AuthChallengeKind {
+  EMAIL_VERIFICATION
+  PHONE_VERIFICATION
+  PASSWORD_RESET
+  TWO_FACTOR_LOGIN
+  STEP_UP
+}
+
 model User {
   id               String    @id @default(cuid())
   first_name       String
@@ -49,12 +57,17 @@ model User {
   type             UserType  @default(uso)
   phone_verified   Boolean   @default(false)
   email_verified   Boolean   @default(false)
+  two_factor_secret String?
+  two_factor_enabled_at DateTime?
+  pending_two_factor_secret String?
+  pending_two_factor_started_at DateTime?
   avatar_media_id  String?
 
   created_at  DateTime @default(now())
   updated_at  DateTime @updatedAt
 
   refresh_tokens       RefreshToken[]
+  auth_challenges      AuthChallenge[]
   media                Media[]
   brands               Brand[]
   brand_transfers      BrandTransfer[] @relation("BrandTransferRequester")
@@ -285,6 +298,31 @@ model RefreshToken {
   created_at DateTime @default(now())
 
   @@index([user_id])
+}
+
+model AuthChallenge {
+  id             String            @id @default(cuid())
+  user_id        String
+  kind           AuthChallengeKind
+  purpose        String
+  token_hash     String?           @unique
+  code_hash      String?
+  target         String?
+  metadata       Json?
+  attempt_count  Int               @default(0)
+  max_attempts   Int               @default(5)
+  delivery_count Int               @default(0)
+  last_sent_at   DateTime?
+  expires_at     DateTime
+  used_at        DateTime?
+  created_at     DateTime          @default(now())
+  updated_at     DateTime          @updatedAt
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, kind])
+  @@index([user_id, purpose])
+  @@index([expires_at])
 }
 
 // ─── Team models ──────────────────────────────────────────────────────────────

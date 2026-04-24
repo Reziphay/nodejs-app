@@ -2,8 +2,15 @@ import { Request, Response, NextFunction } from 'express';
 import prisma from '../lib/prisma';
 import { sendSuccess } from '../utils/response';
 import { AppError } from '../middlewares/error.middleware';
-import { UpdateMeInput } from '../schemas/user.schema';
+import { DeleteMeInput, UpdateMeInput } from '../schemas/user.schema';
 import { buildFileUrl } from '../services/storage.service';
+import {
+  getStepUpPurpose,
+  requireStepUp,
+  requestPhoneVerificationForUser,
+  sendEmailVerificationForUser,
+} from '../services/auth/auth.service';
+import { getRestrictionState } from '../services/auth/auth-policy.service';
 
 const resolveAvatarUrl = (storagePath: string | null | undefined): string | null =>
   storagePath ? buildFileUrl(storagePath) : null;
@@ -35,6 +42,7 @@ const privateUserSelect = {
   type: true,
   phone_verified: true,
   email_verified: true,
+  two_factor_enabled_at: true,
   avatar_media: { select: { storage_path: true } },
   created_at: true,
   updated_at: true,
@@ -117,21 +125,20 @@ export const updateMe = async (
     const emailChanged = body.email !== current.email;
     const phoneChanged = newPhone !== current.phone;
 
-    if (emailChanged && current.email_verified) {
+    if (emailChanged && phoneChanged) {
       const err: AppError = new Error();
-      err.statusCode = 409;
-      err.messageKey = 'user.email_change_not_allowed';
-      return next(err);
-    }
-
-    if (phoneChanged && current.phone_verified && current.phone !== null) {
-      const err: AppError = new Error();
-      err.statusCode = 409;
-      err.messageKey = 'user.phone_change_not_allowed';
+      err.statusCode = 400;
+      err.messageKey = 'user.change_email_or_phone_one_at_a_time';
       return next(err);
     }
 
     if (emailChanged) {
+      await requireStepUp({
+        userId,
+        purpose: getStepUpPurpose.emailChange,
+        token: body.step_up_token,
+      });
+
       const emailTaken = await prisma.user.findUnique({
         where: { email: body.email },
         select: { id: true },
@@ -144,8 +151,17 @@ export const updateMe = async (
       }
     }
 
+    if (phoneChanged) {
+      await requireStepUp({
+        userId,
+        purpose: getStepUpPurpose.phoneChange,
+        token: body.step_up_token,
+      });
+    }
+
     // Uniqueness check on the full E.164 number — not just the local part.
     if (newPhone) {
+
       const phoneTaken = await prisma.user.findUnique({
         where: { phone: newPhone },
         select: { id: true },
@@ -173,7 +189,28 @@ export const updateMe = async (
       select: privateUserSelect,
     });
 
-    const { avatar_media, ...rest } = updated;
+    let phoneVerification:
+      | {
+        challenge_id: string;
+        expires_at: Date;
+      }
+      | undefined;
+
+    if (emailChanged) {
+      await sendEmailVerificationForUser({
+        id: updated.id,
+        email: updated.email,
+      });
+    }
+
+    if (phoneChanged && updated.phone) {
+      phoneVerification = await requestPhoneVerificationForUser({
+        id: updated.id,
+        phone: updated.phone,
+      });
+    }
+
+    const { avatar_media, two_factor_enabled_at, ...rest } = updated;
 
     sendSuccess({
       res,
@@ -183,11 +220,46 @@ export const updateMe = async (
         user: {
           ...rest,
           avatar_url: resolveAvatarUrl(avatar_media?.storage_path),
+          two_factor_enabled: Boolean(two_factor_enabled_at),
         },
+        restriction_state: getRestrictionState(updated),
+        ...(phoneVerification
+          ? {
+            phone_verification: phoneVerification,
+          }
+          : {}),
       },
     });
   } catch (err) {
     next(err);
+  }
+};
+
+export const deleteMe = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const body = req.body as DeleteMeInput;
+
+    await requireStepUp({
+      userId: req.user.sub,
+      purpose: getStepUpPurpose.deleteAccount,
+      token: body.step_up_token,
+    });
+
+    await prisma.user.delete({
+      where: { id: req.user.sub },
+    });
+
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'user.delete_success',
+    });
+  } catch (error) {
+    next(error);
   }
 };
 

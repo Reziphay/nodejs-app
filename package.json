@@ -16,6 +16,7 @@
     "docker:down": "docker compose down",
     "docker:run": "docker compose up --build -d",
     "docker:rebuild": "docker compose down && docker compose build --no-cache && docker compose up -d",
+    "test": "node --test dist/tests/*.test.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:prod": "prisma migrate deploy",

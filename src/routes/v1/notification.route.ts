@@ -7,6 +7,7 @@ import {
   clearFeed,
 } from '../../controllers/notification.controller';
 import { authenticate } from '../../middlewares/auth.middleware';
+import { requireFullyVerified } from '../../middlewares/verification.middleware';
 
 const router: Router = Router();
 
@@ -62,7 +63,7 @@ const router: Router = Router();
  *                     unread_count:
  *                       type: integer
  */
-router.get('/feed', authenticate, getFeed);
+router.get('/feed', authenticate, requireFullyVerified, getFeed);
 
 /**
  * @openapi
@@ -80,7 +81,7 @@ router.get('/feed', authenticate, getFeed);
  *       200:
  *         description: Feed cleared successfully
  */
-router.post('/feed/clear', authenticate, clearFeed);
+router.post('/feed/clear', authenticate, requireFullyVerified, clearFeed);
 
 /**
  * @openapi
@@ -112,7 +113,7 @@ router.post('/feed/clear', authenticate, clearFeed);
  *       400:
  *         description: Invalid source type
  */
-router.delete('/feed/items/:sourceType/:sourceId', authenticate, dismissFeedItem);
+router.delete('/feed/items/:sourceType/:sourceId', authenticate, requireFullyVerified, dismissFeedItem);
 
 // ─── Legacy notification endpoints ───────────────────────────────────────────
 
@@ -129,7 +130,7 @@ router.delete('/feed/items/:sourceType/:sourceId', authenticate, dismissFeedItem
  *       200:
  *         description: Notifications returned
  */
-router.get('/', authenticate, listNotifications);
+router.get('/', authenticate, requireFullyVerified, listNotifications);
 
 /**
  * @openapi
@@ -151,6 +152,6 @@ router.get('/', authenticate, listNotifications);
  *       404:
  *         description: Notification not found
  */
-router.patch('/:id/read', authenticate, markNotificationRead);
+router.patch('/:id/read', authenticate, requireFullyVerified, markNotificationRead);
 
 export default router;

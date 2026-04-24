@@ -1,16 +1,67 @@
 import { Request, Response, NextFunction } from 'express';
-import { randomUUID } from 'crypto';
 import prisma from '../lib/prisma';
-import { hashPassword, comparePassword } from '../utils/hash';
-import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../utils/jwt';
 import { sendSuccess } from '../utils/response';
-import { RegisterInput, LoginInput, RefreshInput } from '../schemas/auth.schema';
-import { env } from '../config/env';
-import { AppError } from '../middlewares/error.middleware';
 import { buildFileUrl } from '../services/storage.service';
+import { getRestrictionState } from '../services/auth/auth-policy.service';
+import {
+  registerUser,
+  loginUser,
+  completeTwoFactorLogin,
+  refreshUserSession,
+  resendEmailVerification,
+  verifyEmailAddress,
+  requestPhoneVerification,
+  verifyPhoneNumber,
+  forgotPassword,
+  resetPassword,
+  beginTwoFactorEnrollment,
+  confirmTwoFactorEnrollment,
+  disableTwoFactor,
+  createStepUpChallenge,
+} from '../services/auth/auth.service';
+import type {
+  RegisterInput,
+  LoginInput,
+  RefreshInput,
+  VerifyEmailInput,
+  VerifyPhoneInput,
+  ForgotPasswordInput,
+  ResetPasswordInput,
+  CompleteTwoFactorLoginInput,
+  ConfirmTwoFactorInput,
+  CreateStepUpInput,
+} from '../schemas/auth.schema';
 
 const resolveAvatarUrl = (storagePath: string | null | undefined): string | null =>
   storagePath ? buildFileUrl(storagePath) : null;
+
+const meSelect = {
+  id: true,
+  first_name: true,
+  last_name: true,
+  birthday: true,
+  phone: true,
+  country: true,
+  email: true,
+  type: true,
+  phone_verified: true,
+  email_verified: true,
+  two_factor_enabled_at: true,
+  avatar_media: { select: { storage_path: true } },
+  created_at: true,
+  updated_at: true,
+} as const;
+
+const getVerificationToken = (req: Request): string => {
+  const queryToken = req.query['token'];
+
+  if (typeof queryToken === 'string' && queryToken.trim()) {
+    return queryToken;
+  }
+
+  const body = req.body as Partial<VerifyEmailInput>;
+  return body.token ?? '';
+};
 
 export const register = async (
   req: Request,
@@ -20,35 +71,20 @@ export const register = async (
   try {
     const body = req.body as RegisterInput;
 
-    const existing = await prisma.user.findUnique({
-      where: { email: body.email },
-      select: { id: true },
+    const result = await registerUser({
+      ...body,
+      phone: body.phone ?? null,
+      remoteIp: req.ip,
     });
 
-    if (existing) {
-      const err: AppError = new Error();
-      err.statusCode = 409;
-      err.messageKey = 'auth.email_already_in_use';
-      return next(err);
-    }
-
-    const hashed_password = await hashPassword(body.password);
-
-    await prisma.user.create({
-      data: {
-        first_name: body.first_name,
-        last_name: body.last_name,
-        birthday: new Date(body.birthday),
-        country: body.country,
-        email: body.email,
-        hashed_password,
-        type: body.type,
-      },
+    sendSuccess({
+      res,
+      status: 201,
+      message: 'auth.register_success',
+      data: result,
     });
-
-    sendSuccess({ res, status: 201, message: 'auth.register_success' });
-  } catch (err) {
-    next(err);
+  } catch (error) {
+    next(error);
   }
 };
 
@@ -59,67 +95,41 @@ export const login = async (
 ): Promise<void> => {
   try {
     const body = req.body as LoginInput;
-
-    const user = await prisma.user.findUnique({
-      where: { email: body.email },
-      select: {
-        id: true,
-        email: true,
-        type: true,
-        hashed_password: true,
-        avatar_media: { select: { storage_path: true } },
-      },
-    });
-
-    if (!user) {
-      const err: AppError = new Error();
-      err.statusCode = 401;
-      err.messageKey = 'auth.invalid_credentials';
-      return next(err);
-    }
-
-    const isValid = await comparePassword(body.password, user.hashed_password);
-
-    if (!isValid) {
-      const err: AppError = new Error();
-      err.statusCode = 401;
-      err.messageKey = 'auth.invalid_credentials';
-      return next(err);
-    }
-
-    const accessToken = signAccessToken({
-      sub: user.id,
-      email: user.email,
-      type: user.type,
-    });
-
-    const jti = randomUUID();
-    const refreshToken = signRefreshToken({ sub: user.id, jti });
-
-    const days = Number(env.JWT_REFRESH_EXPIRES_IN.replace('d', '')) || 7;
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + days);
-
-    await prisma.refreshToken.create({
-      data: {
-        token: refreshToken,
-        user_id: user.id,
-        expires_at: expiresAt,
-      },
+    const result = await loginUser({
+      ...body,
+      remoteIp: req.ip,
     });
 
     sendSuccess({
       res,
       status: 200,
-      message: 'auth.login_success',
-      data: {
-        access_token: accessToken,
-        refresh_token: refreshToken,
-        avatar_url: resolveAvatarUrl(user.avatar_media?.storage_path),
-      },
+      message: result.requires_two_factor
+        ? 'auth.two_factor_challenge_required'
+        : 'auth.login_success',
+      data: result,
     });
-  } catch (err) {
-    next(err);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const completeLoginTwoFactor = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const body = req.body as CompleteTwoFactorLoginInput;
+    const result = await completeTwoFactorLogin(body);
+
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'auth.login_success',
+      data: result,
+    });
+  } catch (error) {
+    next(error);
   }
 };
 
@@ -130,79 +140,16 @@ export const refresh = async (
 ): Promise<void> => {
   try {
     const { refresh_token } = req.body as RefreshInput;
-
-    let payload: ReturnType<typeof verifyRefreshToken>;
-    try {
-      payload = verifyRefreshToken(refresh_token);
-    } catch {
-      const err: AppError = new Error();
-      err.statusCode = 401;
-      err.messageKey = 'errors.invalid_token';
-      return next(err);
-    }
-
-    const stored = await prisma.refreshToken.findUnique({
-      where: { token: refresh_token },
-      select: { id: true, user_id: true, expires_at: true },
-    });
-
-    if (!stored || stored.expires_at < new Date()) {
-      if (stored) {
-        await prisma.refreshToken.delete({ where: { id: stored.id } });
-      }
-      const err: AppError = new Error();
-      err.statusCode = 401;
-      err.messageKey = 'errors.invalid_token';
-      return next(err);
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { id: payload.sub },
-      select: { id: true, email: true, type: true },
-    });
-
-    if (!user) {
-      await prisma.refreshToken.delete({ where: { id: stored.id } });
-      const err: AppError = new Error();
-      err.statusCode = 401;
-      err.messageKey = 'auth.user_not_found';
-      return next(err);
-    }
-
-    await prisma.refreshToken.delete({ where: { id: stored.id } });
-
-    const accessToken = signAccessToken({
-      sub: user.id,
-      email: user.email,
-      type: user.type,
-    });
-
-    const jti = randomUUID();
-    const newRefreshToken = signRefreshToken({ sub: user.id, jti });
-
-    const days = Number(env.JWT_REFRESH_EXPIRES_IN.replace('d', '')) || 7;
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + days);
-
-    await prisma.refreshToken.create({
-      data: {
-        token: newRefreshToken,
-        user_id: user.id,
-        expires_at: expiresAt,
-      },
-    });
+    const result = await refreshUserSession(refresh_token);
 
     sendSuccess({
       res,
       status: 200,
       message: 'auth.refresh_success',
-      data: {
-        access_token: accessToken,
-        refresh_token: newRefreshToken,
-      },
+      data: result,
     });
-  } catch (err) {
-    next(err);
+  } catch (error) {
+    next(error);
   }
 };
 
@@ -212,35 +159,19 @@ export const me = async (
   next: NextFunction,
 ): Promise<void> => {
   try {
-    const userId = req.user.sub;
-
     const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: {
-        id: true,
-        first_name: true,
-        last_name: true,
-        birthday: true,
-        phone: true,      // full E.164, e.g. "+9941234567"
-        country: true,
-        email: true,
-        type: true,
-        phone_verified: true,
-        email_verified: true,
-        avatar_media: { select: { storage_path: true } },
-        created_at: true,
-        updated_at: true,
-      },
+      where: { id: req.user.sub },
+      select: meSelect,
     });
 
     if (!user) {
-      const err: AppError = new Error();
-      err.statusCode = 404;
-      err.messageKey = 'auth.user_not_found';
-      return next(err);
+      const error = new Error() as Error & { statusCode?: number; messageKey?: string };
+      error.statusCode = 404;
+      error.messageKey = 'auth.user_not_found';
+      return next(error);
     }
 
-    const { avatar_media, ...rest } = user;
+    const { avatar_media, two_factor_enabled_at, ...rest } = user;
 
     sendSuccess({
       res,
@@ -250,10 +181,221 @@ export const me = async (
         user: {
           ...rest,
           avatar_url: resolveAvatarUrl(avatar_media?.storage_path),
+          two_factor_enabled: Boolean(two_factor_enabled_at),
         },
+        restriction_state: getRestrictionState(user),
       },
     });
-  } catch (err) {
-    next(err);
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const resendVerificationEmail = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    await resendEmailVerification(req.user.sub);
+
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'auth.email_verification_sent',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const verifyEmail = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    await verifyEmailAddress(getVerificationToken(req));
+
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'auth.email_verified',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const requestPhoneOtp = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const result = await requestPhoneVerification(req.user.sub);
+
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'auth.phone_verification_sent',
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const verifyPhoneOtp = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const body = req.body as VerifyPhoneInput;
+
+    await verifyPhoneNumber({
+      userId: req.user.sub,
+      ...body,
+    });
+
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'auth.phone_verified',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const requestPasswordReset = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const body = req.body as ForgotPasswordInput;
+    await forgotPassword(body.email);
+
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'auth.password_reset_requested',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const completePasswordReset = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const body = req.body as ResetPasswordInput;
+    await resetPassword(body);
+
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'auth.password_reset_success',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const startTwoFactorEnrollment = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const result = await beginTwoFactorEnrollment(req.user.sub);
+
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'auth.two_factor_setup_started',
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const confirmTwoFactorSetup = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const body = req.body as ConfirmTwoFactorInput;
+    await confirmTwoFactorEnrollment({
+      userId: req.user.sub,
+      code: body.code,
+    });
+
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'auth.two_factor_enabled',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const turnOffTwoFactor = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const body = req.body as ConfirmTwoFactorInput;
+    await disableTwoFactor({
+      userId: req.user.sub,
+      code: body.code,
+    });
+
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'auth.two_factor_disabled',
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const createStepUp = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const body = req.body as CreateStepUpInput;
+    const result = await createStepUpChallenge({
+      userId: req.user.sub,
+      purpose: body.purpose,
+      password: body.password,
+      two_factor_code: body.two_factor_code,
+      target: body.target,
+    });
+
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'auth.step_up_ready',
+      data: {
+        step_up_token: result.token,
+        expires_at: result.expires_at,
+        purpose: body.purpose,
+      },
+    });
+  } catch (error) {
+    next(error);
   }
 };

@@ -8,9 +8,11 @@ import type {
   UpdateBrandInput,
   TransferBrandInput,
   UpsertBrandRatingInput,
+  DeleteBrandInput,
   CreateBranchInput,
   UpdateBranchInput,
 } from '../schemas/brand.schema';
+import { getStepUpPurpose, requireStepUp } from '../services/auth/auth.service';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -577,6 +579,7 @@ export const deleteBrand = async (
 
     const id = req.params['id'] as string;
     const userId = req.user.sub;
+    const body = req.body as DeleteBrandInput;
 
     const existing = await prisma.brand.findUnique({ where: { id }, select: { owner_id: true } });
     if (!existing) {
@@ -586,6 +589,12 @@ export const deleteBrand = async (
       return next(err);
     }
     if (!requireOwner(existing.owner_id, userId, next)) return;
+
+    await requireStepUp({
+      userId,
+      purpose: getStepUpPurpose.deleteBrand,
+      token: body.step_up_token,
+    });
 
     // Cancel any pending brand transfers before deletion so foreign-key cascades
     // do not leave orphaned PENDING records.

@@ -21,6 +21,7 @@ import {
 } from '../../controllers/brand.controller';
 import { uploadBrandMedia } from '../../controllers/media.controller';
 import { authenticate } from '../../middlewares/auth.middleware';
+import { requireFullyVerified } from '../../middlewares/verification.middleware';
 import { validate } from '../../middlewares/validate.middleware';
 import { AppError } from '../../middlewares/error.middleware';
 import {
@@ -108,7 +109,7 @@ const router: Router = Router();
  *       415:
  *         description: Invalid file type
  */
-router.post('/brands/media', authenticate, upload.single('file'), uploadBrandMedia);
+router.post('/brands/media', authenticate, requireFullyVerified, upload.single('file'), uploadBrandMedia);
 
 // ─── Categories (public) ──────────────────────────────────────────────────────
 
@@ -157,7 +158,7 @@ router.get('/brands', listPublicBrands);
  *       403:
  *         description: Forbidden — not a USO user
  */
-router.get('/brands/mine', authenticate, getMyBrands);
+router.get('/brands/mine', authenticate, requireFullyVerified, getMyBrands);
 
 /**
  * @openapi
@@ -196,7 +197,7 @@ router.get('/brands/mine', authenticate, getMyBrands);
  *       403:
  *         description: Forbidden
  */
-router.post('/brands', authenticate, validate(createBrandSchema), createBrand);
+router.post('/brands', authenticate, requireFullyVerified, validate(createBrandSchema), createBrand);
 
 /**
  * @openapi
@@ -217,7 +218,7 @@ router.post('/brands', authenticate, validate(createBrandSchema), createBrand);
  *       404:
  *         description: Brand not found
  */
-router.get('/brands/:id', authenticate, getBrandById);
+router.get('/brands/:id', authenticate, requireFullyVerified, getBrandById);
 
 /**
  * @openapi
@@ -242,7 +243,7 @@ router.get('/brands/:id', authenticate, getBrandById);
  *       404:
  *         description: Brand not found
  */
-router.patch('/brands/:id', authenticate, validate(updateBrandSchema), updateBrand);
+router.patch('/brands/:id', authenticate, requireFullyVerified, validate(updateBrandSchema), updateBrand);
 
 /**
  * @openapi
@@ -267,7 +268,7 @@ router.patch('/brands/:id', authenticate, validate(updateBrandSchema), updateBra
  *       404:
  *         description: Brand not found
  */
-router.delete('/brands/:id', authenticate, validate(deleteBrandSchema), deleteBrand);
+router.delete('/brands/:id', authenticate, requireFullyVerified, validate(deleteBrandSchema), deleteBrand);
 
 /**
  * @openapi
@@ -305,17 +306,17 @@ router.delete('/brands/:id', authenticate, validate(deleteBrandSchema), deleteBr
  *       404:
  *         description: Brand or target user not found
  */
-router.post('/brands/:id/transfer', authenticate, validate(transferBrandSchema), transferBrand);
-router.put('/brands/:id/rating', authenticate, validate(upsertBrandRatingSchema), upsertBrandRating);
+router.post('/brands/:id/transfer', authenticate, requireFullyVerified, validate(transferBrandSchema), transferBrand);
+router.put('/brands/:id/rating', authenticate, requireFullyVerified, validate(upsertBrandRatingSchema), upsertBrandRating);
 
 // List pending incoming transfers for the authenticated user
-router.get('/brands/transfers/incoming', authenticate, listIncomingTransfers);
-router.get('/brands/transfers/outgoing', authenticate, listOutgoingTransfers);
+router.get('/brands/transfers/incoming', authenticate, requireFullyVerified, listIncomingTransfers);
+router.get('/brands/transfers/outgoing', authenticate, requireFullyVerified, listOutgoingTransfers);
 
 // Accept / reject / cancel a specific transfer
-router.patch('/brands/transfers/:transferId/accept', authenticate, acceptTransfer);
-router.patch('/brands/transfers/:transferId/reject', authenticate, rejectTransfer);
-router.patch('/brands/transfers/:transferId/cancel', authenticate, cancelTransfer);
+router.patch('/brands/transfers/:transferId/accept', authenticate, requireFullyVerified, acceptTransfer);
+router.patch('/brands/transfers/:transferId/reject', authenticate, requireFullyVerified, rejectTransfer);
+router.patch('/brands/transfers/:transferId/cancel', authenticate, requireFullyVerified, cancelTransfer);
 
 // ─── Branches ─────────────────────────────────────────────────────────────────
 
@@ -342,7 +343,7 @@ router.patch('/brands/transfers/:transferId/cancel', authenticate, cancelTransfe
  *       404:
  *         description: Brand not found
  */
-router.post('/brands/:id/branches', authenticate, validate(createBranchSchema), addBranch);
+router.post('/brands/:id/branches', authenticate, requireFullyVerified, validate(createBranchSchema), addBranch);
 
 /**
  * @openapi
@@ -372,7 +373,7 @@ router.post('/brands/:id/branches', authenticate, validate(createBranchSchema), 
  *       404:
  *         description: Brand or branch not found
  */
-router.patch('/brands/:id/branches/:branchId', authenticate, validate(updateBranchSchema), updateBranch);
+router.patch('/brands/:id/branches/:branchId', authenticate, requireFullyVerified, validate(updateBranchSchema), updateBranch);
 
 /**
  * @openapi
@@ -402,6 +403,6 @@ router.patch('/brands/:id/branches/:branchId', authenticate, validate(updateBran
  *       404:
  *         description: Brand or branch not found
  */
-router.delete('/brands/:id/branches/:branchId', authenticate, deleteBranch);
+router.delete('/brands/:id/branches/:branchId', authenticate, requireFullyVerified, deleteBranch);
 
 export default router;

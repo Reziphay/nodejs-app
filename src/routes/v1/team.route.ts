@@ -9,6 +9,7 @@ import {
   getMyInvitations,
 } from '../../controllers/team.controller';
 import { authenticate } from '../../middlewares/auth.middleware';
+import { requireFullyVerified } from '../../middlewares/verification.middleware';
 import { validate } from '../../middlewares/validate.middleware';
 import { inviteToTeamSchema } from '../../schemas/team.schema';
 
@@ -39,7 +40,7 @@ const router: Router = Router();
  *       404:
  *         description: Brand not found
  */
-router.get('/brands/:id/team-workspace', authenticate, getTeamWorkspace);
+router.get('/brands/:id/team-workspace', authenticate, requireFullyVerified, getTeamWorkspace);
 
 /**
  * @openapi
@@ -69,7 +70,7 @@ router.get('/brands/:id/team-workspace', authenticate, getTeamWorkspace);
  *       404:
  *         description: Brand or branch not found
  */
-router.get('/brands/:id/branches/:branchId/team', authenticate, getBranchTeam);
+router.get('/brands/:id/branches/:branchId/team', authenticate, requireFullyVerified, getBranchTeam);
 
 // ─── Invitations ─────────────────────────────────────────────────────────────
 
@@ -119,6 +120,7 @@ router.get('/brands/:id/branches/:branchId/team', authenticate, getBranchTeam);
 router.post(
   '/brands/:id/branches/:branchId/team/invitations',
   authenticate,
+  requireFullyVerified,
   validate(inviteToTeamSchema),
   inviteToTeam,
 );
@@ -148,7 +150,7 @@ router.post(
  *       404:
  *         description: Membership not found
  */
-router.patch('/team-members/:teamMemberId/accept', authenticate, acceptInvitation);
+router.patch('/team-members/:teamMemberId/accept', authenticate, requireFullyVerified, acceptInvitation);
 
 /**
  * @openapi
@@ -173,7 +175,7 @@ router.patch('/team-members/:teamMemberId/accept', authenticate, acceptInvitatio
  *       404:
  *         description: Membership not found
  */
-router.patch('/team-members/:teamMemberId/reject', authenticate, rejectInvitation);
+router.patch('/team-members/:teamMemberId/reject', authenticate, requireFullyVerified, rejectInvitation);
 
 // ─── My pending invitations ───────────────────────────────────────────────────
 
@@ -194,7 +196,7 @@ router.patch('/team-members/:teamMemberId/reject', authenticate, rejectInvitatio
  */
 // NOTE: this route must be declared BEFORE /:teamMemberId routes so that Express
 // matches the literal path segment "my-invitations" before the param wildcard.
-router.get('/team-members/my-invitations', authenticate, getMyInvitations);
+router.get('/team-members/my-invitations', authenticate, requireFullyVerified, getMyInvitations);
 
 // ─── Remove member (owner) ────────────────────────────────────────────────────
 
@@ -236,6 +238,7 @@ router.get('/team-members/my-invitations', authenticate, getMyInvitations);
 router.patch(
   '/brands/:id/branches/:branchId/team/members/:teamMemberId/remove',
   authenticate,
+  requireFullyVerified,
   removeMember,
 );
 

@@ -96,6 +96,7 @@ export type UpsertBrandRatingInput = z.infer<typeof upsertBrandRatingSchema>;
 // Transfer-service paths are intentionally excluded to prevent misleading clients.
 export const deleteBrandSchema = z.object({
   service_handling: z.literal('delete_with_services').default('delete_with_services'),
+  step_up_token: z.string().min(1, 'Step-up token is required'),
 });
 
 export type DeleteBrandInput = z.infer<typeof deleteBrandSchema>;

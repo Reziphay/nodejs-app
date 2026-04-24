@@ -1,8 +1,8 @@
 import { Router } from 'express';
-import { getUserById, updateMe, searchUsoUsers } from '../../controllers/user.controller';
+import { deleteMe, getUserById, updateMe, searchUsoUsers } from '../../controllers/user.controller';
 import { authenticate } from '../../middlewares/auth.middleware';
 import { validate } from '../../middlewares/validate.middleware';
-import { updateMeSchema } from '../../schemas/user.schema';
+import { deleteMeSchema, updateMeSchema } from '../../schemas/user.schema';
 
 const router: Router = Router();
 
@@ -71,6 +71,21 @@ const router: Router = Router();
  *           - user.phone_change_not_allowed — phone is verified and cannot be changed
  */
 router.patch('/me', authenticate, validate(updateMeSchema), updateMe);
+
+/**
+ * @openapi
+ * /api/v1/users/me:
+ *   delete:
+ *     tags:
+ *       - Users
+ *     summary: Delete the authenticated account after step-up authentication
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Account deleted successfully
+ */
+router.delete('/me', authenticate, validate(deleteMeSchema), deleteMe);
 
 // Search USO users by name / email / phone for brand transfer (USO only)
 router.get('/search', authenticate, searchUsoUsers);

@@ -5,6 +5,8 @@ import { sendError } from '../utils/response';
 export interface AppError extends Error {
   statusCode?: number;
   messageKey?: string;
+  errors?: { field: string; message: string }[];
+  details?: unknown;
 }
 
 export const errorMiddleware = (
@@ -26,5 +28,5 @@ export const errorMiddleware = (
     logger.warn(context);
   }
 
-  sendError({ res, status, message });
+  sendError({ res, status, message, errors: err.errors, data: err.details });
 };
