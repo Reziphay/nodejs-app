@@ -20,7 +20,7 @@ import {
   listCategories,
 } from '../../controllers/brand.controller';
 import { uploadBrandMedia } from '../../controllers/media.controller';
-import { authenticate } from '../../middlewares/auth.middleware';
+import { authenticate, authenticateOptional } from '../../middlewares/auth.middleware';
 import { requireFullyVerified } from '../../middlewares/verification.middleware';
 import { validate } from '../../middlewares/validate.middleware';
 import { AppError } from '../../middlewares/error.middleware';
@@ -205,7 +205,7 @@ router.post('/brands', authenticate, requireFullyVerified, validate(createBrandS
  *   get:
  *     tags:
  *       - Brands
- *     summary: Get a brand by ID (public for ACTIVE brands, owner-only otherwise)
+ *     summary: Get a brand by ID (public for ACTIVE/CLOSED brands, owner/admin for other states)
  *     parameters:
  *       - in: path
  *         name: id
@@ -218,7 +218,7 @@ router.post('/brands', authenticate, requireFullyVerified, validate(createBrandS
  *       404:
  *         description: Brand not found
  */
-router.get('/brands/:id', authenticate, requireFullyVerified, getBrandById);
+router.get('/brands/:id', authenticateOptional, getBrandById);
 
 /**
  * @openapi

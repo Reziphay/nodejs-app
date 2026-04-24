@@ -73,6 +73,10 @@ model User {
   brand_transfers      BrandTransfer[] @relation("BrandTransferRequester")
   received_transfers   BrandTransfer[] @relation("BrandTransferRecipient")
   brand_ratings        BrandRating[]
+  brands_reviewed      Brand[]         @relation("BrandModerationReviewer")
+  brand_slot_entitlements BrandSlotEntitlement[] @relation("BrandSlotEntitlementUser")
+  granted_brand_slot_entitlements BrandSlotEntitlement[] @relation("BrandSlotEntitlementGrantor")
+  brand_rating_eligibilities BrandRatingEligibility[]
   notifications        Notification[]
   teams_created             Team[]                       @relation("TeamCreator")
   team_memberships          TeamMember[]                 @relation("TeamMemberUser")
@@ -108,6 +112,7 @@ model Media {
   brand_logo    Brand[]        @relation("BrandLogo")
   brand_gallery BrandGallery[] @relation("BrandGallery")
   branch_covers Branch[]       @relation("BranchCover")
+  branch_interiors BranchInteriorMedia[] @relation("BranchInteriorMedia")
 
   @@index([owner_id])
 }
@@ -138,22 +143,31 @@ model Brand {
   id            String      @id @default(cuid())
   name          String
   description   String?
+  website_url   String?
+  social_links  Json?
   status        BrandStatus @default(PENDING)
   owner_id      String
   logo_media_id String?
+  submitted_for_review_at     DateTime?
+  moderation_reviewed_at      DateTime?
+  moderation_reviewed_by_user_id String?
+  moderation_rejection_reason String?
   created_at    DateTime    @default(now())
   updated_at    DateTime    @updatedAt
 
   owner      User           @relation(fields: [owner_id], references: [id], onDelete: Cascade)
   logo_media Media?         @relation("BrandLogo", fields: [logo_media_id], references: [id], onDelete: SetNull)
+  moderation_reviewer User? @relation("BrandModerationReviewer", fields: [moderation_reviewed_by_user_id], references: [id], onDelete: SetNull)
   gallery    BrandGallery[]
   branches   Branch[]
   categories BrandCategory[]
   ratings    BrandRating[]
+  rating_eligibilities BrandRatingEligibility[]
   transfers  BrandTransfer[]
 
   @@index([owner_id])
   @@index([status])
+  @@index([moderation_reviewed_by_user_id])
 }
 
 model BrandGallery {
@@ -175,6 +189,10 @@ model Branch {
   description    String?
   address1       String
   address2       String?
+  city           String?
+  state          String?
+  postal_code    String?
+  country        String?
   phone          String?
   email          String?
   is_24_7        Boolean  @default(false)
@@ -188,6 +206,7 @@ model Branch {
   breaks      BranchBreak[]
   team        Team?         @relation("BranchTeam")
   cover_media Media?        @relation("BranchCover", fields: [cover_media_id], references: [id], onDelete: SetNull)
+  interior_media BranchInteriorMedia[]
 
   @@index([brand_id])
 }
@@ -199,6 +218,19 @@ model BranchBreak {
   end       String
 
   branch Branch @relation(fields: [branch_id], references: [id], onDelete: Cascade)
+}
+
+model BranchInteriorMedia {
+  id       String @id @default(cuid())
+  branch_id String
+  media_id String
+  order    Int    @default(0)
+
+  branch Branch @relation(fields: [branch_id], references: [id], onDelete: Cascade)
+  media  Media  @relation("BranchInteriorMedia", fields: [media_id], references: [id], onDelete: Cascade)
+
+  @@index([branch_id])
+  @@index([media_id])
 }
 
 model BrandTransfer {
@@ -233,6 +265,48 @@ model BrandRating {
   @@unique([brand_id, user_id])
   @@index([brand_id])
   @@index([user_id])
+}
+
+enum BrandSlotEntitlementStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+}
+
+model BrandSlotEntitlement {
+  id                 String                     @id @default(cuid())
+  user_id            String
+  additional_slots   Int                        @default(1)
+  source             String
+  external_reference String?
+  status             BrandSlotEntitlementStatus @default(ACTIVE)
+  starts_at          DateTime?
+  ends_at            DateTime?
+  granted_by_user_id String?
+  notes              String?
+  created_at         DateTime                   @default(now())
+  updated_at         DateTime                   @updatedAt
+
+  user       User  @relation("BrandSlotEntitlementUser", fields: [user_id], references: [id], onDelete: Cascade)
+  granted_by User? @relation("BrandSlotEntitlementGrantor", fields: [granted_by_user_id], references: [id], onDelete: SetNull)
+
+  @@index([user_id, status])
+  @@index([granted_by_user_id])
+}
+
+model BrandRatingEligibility {
+  id                    String   @id @default(cuid())
+  brand_id              String
+  user_id               String
+  reservation_reference String
+  completed_at          DateTime
+  created_at            DateTime @default(now())
+
+  brand Brand @relation(fields: [brand_id], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([brand_id, user_id, reservation_reference])
+  @@index([brand_id, user_id])
 }
 
 // ─── Notification Feed ───────────────────────────────────────────────────────

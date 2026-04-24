@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { Prisma } from '../generated/prisma/client';
 import prisma from '../lib/prisma';
 import { sendSuccess } from '../utils/response';
 import { AppError } from '../middlewares/error.middleware';
@@ -13,6 +14,12 @@ import type {
   UpdateBranchInput,
 } from '../schemas/brand.schema';
 import { getStepUpPurpose, requireStepUp } from '../services/auth/auth.service';
+import { buildBrandResubmissionPatch } from '../services/brand-moderation.service';
+import { hasCompletedReservationEligibility } from '../services/brand-rating-eligibility.service';
+import {
+  buildBrandSlotSnapshot,
+  type BrandSlotEntitlementLike,
+} from '../services/brand-slot.service';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -47,6 +54,73 @@ function requireOwner(ownerId: string, userId: string, next: NextFunction): bool
     return false;
   }
   return true;
+}
+
+function getViewerRole(
+  user: Request['user'] | undefined,
+  ownerId: string,
+): 'public' | 'owner' | 'admin' {
+  if (!user?.sub) {
+    return 'public';
+  }
+
+  if (user.sub === ownerId) {
+    return 'owner';
+  }
+
+  if (user.type === 'admin') {
+    return 'admin';
+  }
+
+  return 'public';
+}
+
+function createError(statusCode: number, messageKey: string, details?: unknown): AppError {
+  const err: AppError = new Error();
+  err.statusCode = statusCode;
+  err.messageKey = messageKey;
+  err.details = details;
+  return err;
+}
+
+function mapSocialLinks(value: unknown): Record<string, string> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined;
+  }
+
+  const entries = Object.entries(value).filter(([, entryValue]) => typeof entryValue === 'string');
+  if (entries.length === 0) {
+    return undefined;
+  }
+
+  return Object.fromEntries(entries);
+}
+
+async function getBrandSlotSnapshotForUser(userId: string) {
+  const [ownedBrandCount, entitlements] = await Promise.all([
+    prisma.brand.count({ where: { owner_id: userId } }),
+    prisma.brandSlotEntitlement.findMany({
+      where: { user_id: userId },
+      select: {
+        additional_slots: true,
+        status: true,
+        starts_at: true,
+        ends_at: true,
+      },
+    }),
+  ]);
+
+  return buildBrandSlotSnapshot(
+    ownedBrandCount,
+    entitlements as BrandSlotEntitlementLike[],
+  );
+}
+
+async function ensureBrandSlotAvailable(userId: string): Promise<void> {
+  const slotSnapshot = await getBrandSlotSnapshotForUser(userId);
+  if (!slotSnapshot.has_available_slot) {
+    throw createError(403, 'brand.slot_limit_reached', { slot_usage: slotSnapshot });
+  }
 }
 
 async function validateMediaOwnership(
@@ -132,13 +206,26 @@ const brandSelect = {
   id: true,
   name: true,
   description: true,
+  website_url: true,
+  social_links: true,
   status: true,
   owner_id: true,
   logo_media_id: true,
+  submitted_for_review_at: true,
+  moderation_reviewed_at: true,
+  moderation_reviewed_by_user_id: true,
+  moderation_rejection_reason: true,
   created_at: true,
   updated_at: true,
   categories: { select: { id: true, name: true } },
   logo_media: { select: { id: true, storage_path: true } },
+  moderation_reviewer: {
+    select: {
+      id: true,
+      first_name: true,
+      last_name: true,
+    },
+  },
   gallery: {
     select: {
       id: true,
@@ -159,25 +246,37 @@ const brandSelect = {
 type BrandRaw = Awaited<ReturnType<typeof prisma.brand.findUniqueOrThrow>> & {
   categories: { id: string; name: string }[];
   logo_media: { id: string; storage_path: string } | null;
+  social_links: unknown;
+  moderation_reviewer: { id: string; first_name: string; last_name: string } | null;
   gallery: { id: string; media_id: string; order: number; media: { id: string; storage_path: string } }[];
   ratings: { value: number; user_id: string }[];
 };
 
-function mapBrand(raw: BrandRaw, requesterId?: string) {
+function mapBrand(
+  raw: BrandRaw,
+  options: {
+    requesterId?: string;
+    viewerRole?: 'public' | 'owner' | 'admin';
+    canRate?: boolean;
+  } = {},
+) {
+  const viewerRole = options.viewerRole ?? 'public';
   const ratingCount = raw.ratings.length;
   const ratingAverage =
     ratingCount > 0
       ? roundRating(raw.ratings.reduce((sum, rating) => sum + rating.value, 0) / ratingCount)
       : null;
   const myRating =
-    requesterId
-      ? raw.ratings.find((rating) => rating.user_id === requesterId)?.value ?? null
+    options.requesterId
+      ? raw.ratings.find((rating) => rating.user_id === options.requesterId)?.value ?? null
       : null;
 
-  return {
+  const base = {
     id: raw.id,
     name: raw.name,
     description: raw.description ?? undefined,
+    website_url: raw.website_url ?? undefined,
+    social_links: mapSocialLinks(raw.social_links),
     status: raw.status,
     owner_id: raw.owner_id,
     logo_url: raw.logo_media ? buildFileUrl(raw.logo_media.storage_path) : undefined,
@@ -191,8 +290,36 @@ function mapBrand(raw: BrandRaw, requesterId?: string) {
     rating: ratingAverage,
     rating_count: ratingCount,
     my_rating: myRating,
+    ratings: {
+      average: ratingAverage,
+      count: ratingCount,
+      my_rating: myRating,
+      can_rate: options.canRate ?? false,
+    },
     created_at: raw.created_at.toISOString(),
     updated_at: raw.updated_at.toISOString(),
+  };
+
+  if (viewerRole === 'public') {
+    return base;
+  }
+
+  return {
+    ...base,
+    moderation: {
+      status: raw.status,
+      submitted_for_review_at: raw.submitted_for_review_at?.toISOString() ?? null,
+      reviewed_at: raw.moderation_reviewed_at?.toISOString() ?? null,
+      rejection_reason: raw.moderation_rejection_reason ?? null,
+      is_resubmittable: raw.status === 'REJECTED',
+      reviewer: raw.moderation_reviewer
+        ? {
+            id: raw.moderation_reviewer.id,
+            first_name: raw.moderation_reviewer.first_name,
+            last_name: raw.moderation_reviewer.last_name,
+          }
+        : null,
+    },
   };
 }
 
@@ -203,6 +330,10 @@ const branchSelect = {
   description: true,
   address1: true,
   address2: true,
+  city: true,
+  state: true,
+  postal_code: true,
+  country: true,
   phone: true,
   email: true,
   is_24_7: true,
@@ -212,6 +343,15 @@ const branchSelect = {
   created_at: true,
   updated_at: true,
   breaks: { select: { id: true, start: true, end: true } },
+  interior_media: {
+    select: {
+      id: true,
+      media_id: true,
+      order: true,
+      media: { select: { id: true, storage_path: true } },
+    },
+    orderBy: { order: 'asc' as const },
+  },
   cover_media: { select: { id: true, storage_path: true } },
 } as const;
 
@@ -222,6 +362,10 @@ type BranchRaw = {
   description: string | null;
   address1: string;
   address2: string | null;
+  city: string | null;
+  state: string | null;
+  postal_code: string | null;
+  country: string | null;
   phone: string | null;
   email: string | null;
   is_24_7: boolean;
@@ -231,6 +375,12 @@ type BranchRaw = {
   created_at: Date;
   updated_at: Date;
   breaks: { id: string; start: string; end: string }[];
+  interior_media: {
+    id: string;
+    media_id: string;
+    order: number;
+    media: { id: string; storage_path: string };
+  }[];
   cover_media: { id: string; storage_path: string } | null;
 };
 
@@ -242,6 +392,18 @@ function mapBranch(raw: BranchRaw) {
     description: raw.description ?? undefined,
     address1: raw.address1,
     address2: raw.address2 ?? undefined,
+    city: raw.city ?? undefined,
+    state: raw.state ?? undefined,
+    postal_code: raw.postal_code ?? undefined,
+    country: raw.country ?? undefined,
+    address: {
+      address1: raw.address1,
+      address2: raw.address2 ?? null,
+      city: raw.city ?? null,
+      state: raw.state ?? null,
+      postal_code: raw.postal_code ?? null,
+      country: raw.country ?? null,
+    },
     phone: raw.phone ?? undefined,
     email: raw.email ?? undefined,
     is_24_7: raw.is_24_7,
@@ -250,6 +412,12 @@ function mapBranch(raw: BranchRaw) {
     cover_media_id: raw.cover_media_id ?? null,
     cover_url: raw.cover_media ? buildFileUrl(raw.cover_media.storage_path) : null,
     breaks: raw.breaks,
+    interior_gallery: raw.interior_media.map((media) => ({
+      id: media.id,
+      media_id: media.media_id,
+      order: media.order,
+      url: buildFileUrl(media.media.storage_path),
+    })),
     created_at: raw.created_at.toISOString(),
     updated_at: raw.updated_at.toISOString(),
   };
@@ -315,16 +483,19 @@ export const createBrand = async (
     }
 
     const body = req.body as CreateBrandInput;
+    await ensureBrandSlotAvailable(userId);
 
     // Validate media ownership — brand logo + gallery + all branch cover images
-    const branchCoverIds = (body.branches ?? [])
+    const branchCoverIds = body.branches
       .map((b) => b.cover_media_id)
       .filter((id): id is string => typeof id === 'string');
+    const branchInteriorIds = body.branches.flatMap((branch) => branch.interior_media_ids ?? []);
 
     const allMediaIds = [
       ...(body.logo_media_id ? [body.logo_media_id] : []),
       ...(body.gallery_media_ids ?? []),
       ...branchCoverIds,
+      ...branchInteriorIds,
     ];
     if (!(await validateMediaOwnership(allMediaIds, userId, next))) return;
 
@@ -344,13 +515,17 @@ export const createBrand = async (
       return;
     }
 
+    const now = new Date();
     const brand = await prisma.$transaction(async (tx) => {
       const created = await tx.brand.create({
         data: {
           name: body.name,
           description: body.description,
+          website_url: body.website_url,
+          social_links: body.social_links,
           owner_id: userId,
           logo_media_id: body.logo_media_id ?? null,
+          submitted_for_review_at: now,
           categories:
             body.categoryIds && body.categoryIds.length > 0
               ? { connect: body.categoryIds.map((id) => ({ id })) }
@@ -364,60 +539,78 @@ export const createBrand = async (
                   })),
                 }
               : undefined,
-          branches:
-            body.branches && body.branches.length > 0
-              ? {
-                  create: body.branches.map((branch) => ({
-                    name: branch.name,
-                    description: branch.description,
-                    address1: branch.address1,
-                    address2: branch.address2,
-                    phone: branch.phone,
-                    email: branch.email,
-                    is_24_7: branch.is_24_7 ?? false,
-                    opening: branch.is_24_7 ? null : (branch.opening ?? null),
-                    closing: branch.is_24_7 ? null : (branch.closing ?? null),
-                    cover_media_id: branch.cover_media_id ?? null,
-                    breaks:
-                      branch.breaks && branch.breaks.length > 0
-                        ? { create: branch.breaks.map((item) => ({ start: item.start, end: item.end })) }
-                        : undefined,
-                  })),
-                }
-              : undefined,
+          branches: {
+            create: body.branches.map((branch) => ({
+              name: branch.name,
+              description: branch.description,
+              address1: branch.address1,
+              address2: branch.address2,
+              city: branch.city,
+              state: branch.state,
+              postal_code: branch.postal_code,
+              country: branch.country,
+              phone: branch.phone,
+              email: branch.email,
+              is_24_7: branch.is_24_7 ?? false,
+              opening: branch.is_24_7 ? null : (branch.opening ?? null),
+              closing: branch.is_24_7 ? null : (branch.closing ?? null),
+              cover_media_id: branch.cover_media_id ?? null,
+              breaks:
+                branch.breaks && branch.breaks.length > 0
+                  ? { create: branch.breaks.map((item) => ({ start: item.start, end: item.end })) }
+                  : undefined,
+              interior_media:
+                branch.interior_media_ids && branch.interior_media_ids.length > 0
+                  ? {
+                      create: branch.interior_media_ids.map((mediaId, index) => ({
+                        media_id: mediaId,
+                        order: index,
+                      })),
+                    }
+                  : undefined,
+            })),
+          },
         },
         select: { id: true },
       });
 
       // Auto-create a Team + OWNER membership for each branch created above
-      if (body.branches && body.branches.length > 0) {
-        const newBranches = await tx.branch.findMany({
-          where: { brand_id: created.id },
-          select: { id: true },
-        });
+      const newBranches = await tx.branch.findMany({
+        where: { brand_id: created.id },
+        select: { id: true },
+      });
 
-        for (const branch of newBranches) {
-          await tx.team.create({
-            data: {
-              branch_id: branch.id,
-              created_by_user_id: userId,
-              members: {
-                create: {
-                  user_id: userId,
-                  invited_by_user_id: userId,
-                  role: 'OWNER',
-                  status: 'ACCEPTED',
-                },
+      for (const branch of newBranches) {
+        await tx.team.create({
+          data: {
+            branch_id: branch.id,
+            created_by_user_id: userId,
+            members: {
+              create: {
+                user_id: userId,
+                invited_by_user_id: userId,
+                role: 'OWNER',
+                status: 'ACCEPTED',
               },
             },
-          });
-        }
+          },
+        });
       }
 
       return tx.brand.findUniqueOrThrow({ where: { id: created.id }, select: brandSelect });
     });
 
-    sendSuccess({ res, status: 201, message: 'brand.created', data: { brand: mapBrand(brand as BrandRaw, userId) } });
+    const slotUsage = await getBrandSlotSnapshotForUser(userId);
+
+    sendSuccess({
+      res,
+      status: 201,
+      message: 'brand.created',
+      data: {
+        brand: mapBrand(brand as BrandRaw, { requesterId: userId, viewerRole: 'owner' }),
+        slot_usage: slotUsage,
+      },
+    });
   } catch (err) {
     next(err);
   }
@@ -433,13 +626,24 @@ export const getMyBrands = async (
 
     const userId = req.user.sub;
 
-    const brands = await prisma.brand.findMany({
-      where: { owner_id: userId },
-      select: brandSelect,
-      orderBy: { created_at: 'desc' },
-    });
+    const [brands, slotUsage] = await Promise.all([
+      prisma.brand.findMany({
+        where: { owner_id: userId },
+        select: brandSelect,
+        orderBy: { created_at: 'desc' },
+      }),
+      getBrandSlotSnapshotForUser(userId),
+    ]);
 
-    sendSuccess({ res, status: 200, message: 'brand.list', data: { brands: brands.map((b) => mapBrand(b as BrandRaw, userId)) } });
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'brand.list',
+      data: {
+        brands: brands.map((brand) => mapBrand(brand as BrandRaw, { requesterId: userId, viewerRole: 'owner' })),
+        slot_usage: slotUsage,
+      },
+    });
   } catch (err) {
     next(err);
   }
@@ -455,26 +659,35 @@ export const getBrandById = async (
 
     const brand = await prisma.brand.findUnique({
       where: { id },
-      select: { ...brandSelect, branches: { select: branchSelect } },
+      select: {
+        ...brandSelect,
+        branches: {
+          select: branchSelect,
+          orderBy: { created_at: 'asc' },
+        },
+      },
     });
 
     if (!brand) {
-      const err: AppError = new Error();
-      err.statusCode = 404;
-      err.messageKey = 'brand.not_found';
-      return next(err);
+      return next(createError(404, 'brand.not_found'));
     }
 
-    // Non-ACTIVE brands are only visible to their owner
-    if (brand.status !== 'ACTIVE') {
-      const userId = req.user?.sub;
-      if (!userId || brand.owner_id !== userId) {
-        const err: AppError = new Error();
-        err.statusCode = 404;
-        err.messageKey = 'brand.not_found';
-        return next(err);
-      }
+    const viewerRole = getViewerRole(req.user, brand.owner_id);
+    const isPubliclyVisible = brand.status === 'ACTIVE' || brand.status === 'CLOSED';
+    if (!isPubliclyVisible && viewerRole === 'public') {
+      return next(createError(404, 'brand.not_found'));
     }
+
+    const canRate =
+      req.user?.type === 'ucr' && brand.status === 'ACTIVE'
+        ? hasCompletedReservationEligibility(
+            await prisma.brandRatingEligibility.findFirst({
+              where: { brand_id: id, user_id: req.user.sub },
+              select: { completed_at: true },
+              orderBy: { completed_at: 'desc' },
+            }),
+          )
+        : false;
 
     sendSuccess({
       res,
@@ -482,9 +695,14 @@ export const getBrandById = async (
       message: 'brand.found',
       data: {
         brand: {
-          ...mapBrand(brand as BrandRaw, req.user?.sub),
+          ...mapBrand(brand as BrandRaw, {
+            requesterId: req.user?.sub,
+            viewerRole,
+            canRate,
+          }),
           branches: brand.branches.map((b) => mapBranch(b as BranchRaw)),
         },
+        ...(viewerRole === 'owner' ? { slot_usage: await getBrandSlotSnapshotForUser(brand.owner_id) } : {}),
       },
     });
   } catch (err) {
@@ -503,12 +721,12 @@ export const updateBrand = async (
     const id = req.params['id'] as string;
     const userId = req.user.sub;
 
-    const existing = await prisma.brand.findUnique({ where: { id }, select: { owner_id: true } });
+    const existing = await prisma.brand.findUnique({
+      where: { id },
+      select: { owner_id: true, status: true },
+    });
     if (!existing) {
-      const err: AppError = new Error();
-      err.statusCode = 404;
-      err.messageKey = 'brand.not_found';
-      return next(err);
+      return next(createError(404, 'brand.not_found'));
     }
     if (!requireOwner(existing.owner_id, userId, next)) return;
 
@@ -532,38 +750,52 @@ export const updateBrand = async (
       return;
     }
 
-    // Gallery: if provided, delete all existing entries and recreate the full list.
-    // The frontend must include existing media_ids it wants to keep alongside new ones.
-    if (body.gallery_media_ids !== undefined) {
-      await prisma.brandGallery.deleteMany({ where: { brand_id: id } });
-    }
+    const now = new Date();
+    const brand = await prisma.$transaction(async (tx) => {
+      if (body.gallery_media_ids !== undefined) {
+        await tx.brandGallery.deleteMany({ where: { brand_id: id } });
+      }
 
-    const brand = await prisma.brand.update({
-      where: { id },
-      data: {
-        ...(body.name !== undefined && { name: body.name }),
-        ...(body.description !== undefined && { description: body.description }),
-        // logo_media_id can be set to null (removal) or a new id; skip if not in payload
-        ...(body.logo_media_id !== undefined && { logo_media_id: body.logo_media_id }),
-        ...(body.categoryIds !== undefined && {
-          categories: {
-            set: body.categoryIds.map((cid) => ({ id: cid })),
-          },
-        }),
-        ...(body.gallery_media_ids !== undefined &&
-          body.gallery_media_ids.length > 0 && {
-            gallery: {
-              create: body.gallery_media_ids.map((mediaId, index) => ({
-                media_id: mediaId,
-                order: index,
-              })),
+      return tx.brand.update({
+        where: { id },
+        data: {
+          ...buildBrandResubmissionPatch(existing.status, now),
+          ...(body.name !== undefined && { name: body.name }),
+          ...(body.description !== undefined && { description: body.description }),
+          ...(body.website_url !== undefined && { website_url: body.website_url }),
+          ...(body.social_links !== undefined && {
+            social_links: body.social_links === null ? Prisma.JsonNull : body.social_links,
+          }),
+          ...(body.logo_media_id !== undefined && {
+            logo_media: body.logo_media_id
+              ? { connect: { id: body.logo_media_id } }
+              : { disconnect: true },
+          }),
+          ...(body.categoryIds !== undefined && {
+            categories: {
+              set: body.categoryIds.map((cid) => ({ id: cid })),
             },
           }),
-      },
-      select: brandSelect,
+          ...(body.gallery_media_ids !== undefined &&
+            body.gallery_media_ids.length > 0 && {
+              gallery: {
+                create: body.gallery_media_ids.map((mediaId, index) => ({
+                  media_id: mediaId,
+                  order: index,
+                })),
+              },
+            }),
+        },
+        select: brandSelect,
+      });
     });
 
-    sendSuccess({ res, status: 200, message: 'brand.updated', data: { brand: mapBrand(brand as BrandRaw, userId) } });
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'brand.updated',
+      data: { brand: mapBrand(brand as BrandRaw, { requesterId: userId, viewerRole: 'owner' }) },
+    });
   } catch (err) {
     next(err);
   }
@@ -640,7 +872,12 @@ export const listPublicBrands = async (
       ]);
 
       const brands = [...activeBrands, ...closedBrands];
-      sendSuccess({ res, status: 200, message: 'brand.list', data: { brands: brands.map((b) => mapBrand(b as BrandRaw)) } });
+      sendSuccess({
+        res,
+        status: 200,
+        message: 'brand.list',
+        data: { brands: brands.map((brand) => mapBrand(brand as BrandRaw)) },
+      });
       return;
     }
 
@@ -651,7 +888,12 @@ export const listPublicBrands = async (
       orderBy: { created_at: 'desc' },
     });
 
-    sendSuccess({ res, status: 200, message: 'brand.list', data: { brands: brands.map((b) => mapBrand(b as BrandRaw)) } });
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'brand.list',
+      data: { brands: brands.map((brand) => mapBrand(brand as BrandRaw)) },
+    });
   } catch (err) {
     next(err);
   }
@@ -675,10 +917,17 @@ export const upsertBrandRating = async (
     });
 
     if (!brand || brand.status !== 'ACTIVE') {
-      const err: AppError = new Error();
-      err.statusCode = 404;
-      err.messageKey = 'brand.not_found';
-      return next(err);
+      return next(createError(404, 'brand.not_found'));
+    }
+
+    const ratingEligibility = await prisma.brandRatingEligibility.findFirst({
+      where: { brand_id: id, user_id: userId },
+      select: { completed_at: true },
+      orderBy: { completed_at: 'desc' },
+    });
+
+    if (!hasCompletedReservationEligibility(ratingEligibility)) {
+      return next(createError(403, 'brand.rating_requires_completed_reservation'));
     }
 
     await prisma.brandRating.upsert({
@@ -702,17 +951,20 @@ export const upsertBrandRating = async (
     });
 
     if (!updatedBrand) {
-      const err: AppError = new Error();
-      err.statusCode = 404;
-      err.messageKey = 'brand.not_found';
-      return next(err);
+      return next(createError(404, 'brand.not_found'));
     }
 
     sendSuccess({
       res,
       status: 200,
       message: 'brand.rating_saved',
-      data: { brand: mapBrand(updatedBrand as BrandRaw, userId) },
+      data: {
+        brand: mapBrand(updatedBrand as BrandRaw, {
+          requesterId: userId,
+          viewerRole: 'public',
+          canRate: true,
+        }),
+      },
     });
   } catch (err) {
     next(err);
@@ -833,6 +1085,8 @@ export const acceptTransfer = async (
       err.messageKey = 'brand.transfer_not_pending';
       return next(err);
     }
+
+    await ensureBrandSlotAvailable(userId);
 
     // Update owner and mark transfer accepted atomically
     await prisma.$transaction([
@@ -1104,20 +1358,27 @@ export const addBranch = async (
     const brandId = req.params['id'] as string;
     const userId = req.user.sub;
 
-    const brand = await prisma.brand.findUnique({ where: { id: brandId }, select: { owner_id: true } });
+    const brand = await prisma.brand.findUnique({
+      where: { id: brandId },
+      select: { owner_id: true, status: true },
+    });
     if (!brand) {
-      const err: AppError = new Error();
-      err.statusCode = 404;
-      err.messageKey = 'brand.not_found';
-      return next(err);
+      return next(createError(404, 'brand.not_found'));
     }
     if (!requireOwner(brand.owner_id, userId, next)) return;
 
     const body = req.body as CreateBranchInput;
+    const mediaIds = [
+      ...(body.cover_media_id ? [body.cover_media_id] : []),
+      ...(body.interior_media_ids ?? []),
+    ];
+
+    if (!(await validateMediaOwnership(mediaIds, userId, next))) return;
 
     // Validate branch cover ownership + aspect ratio before entering the transaction
     if (!(await validateBranchCoverMediaOwnershipAndRatio(body.cover_media_id, userId, next))) return;
 
+    const now = new Date();
     const branch = await prisma.$transaction(async (tx) => {
       const newBranch = await tx.branch.create({
         data: {
@@ -1126,6 +1387,10 @@ export const addBranch = async (
           description: body.description,
           address1: body.address1,
           address2: body.address2,
+          city: body.city,
+          state: body.state,
+          postal_code: body.postal_code,
+          country: body.country,
           phone: body.phone,
           email: body.email,
           is_24_7: body.is_24_7 ?? false,
@@ -1135,6 +1400,15 @@ export const addBranch = async (
           breaks:
             body.breaks && body.breaks.length > 0
               ? { create: body.breaks.map((b) => ({ start: b.start, end: b.end })) }
+              : undefined,
+          interior_media:
+            body.interior_media_ids && body.interior_media_ids.length > 0
+              ? {
+                  create: body.interior_media_ids.map((mediaId, index) => ({
+                    media_id: mediaId,
+                    order: index,
+                  })),
+                }
               : undefined,
         },
         select: branchSelect,
@@ -1155,6 +1429,14 @@ export const addBranch = async (
           },
         },
       });
+
+      const moderationPatch = buildBrandResubmissionPatch(brand.status, now);
+      if (Object.keys(moderationPatch).length > 0) {
+        await tx.brand.update({
+          where: { id: brandId },
+          data: moderationPatch,
+        });
+      }
 
       return newBranch;
     });
@@ -1177,63 +1459,107 @@ export const updateBranch = async (
     const branchId = req.params['branchId'] as string;
     const userId = req.user.sub;
 
-    const brand = await prisma.brand.findUnique({ where: { id: brandId }, select: { owner_id: true } });
+    const brand = await prisma.brand.findUnique({
+      where: { id: brandId },
+      select: { owner_id: true, status: true },
+    });
     if (!brand) {
-      const err: AppError = new Error();
-      err.statusCode = 404;
-      err.messageKey = 'brand.not_found';
-      return next(err);
+      return next(createError(404, 'brand.not_found'));
     }
     if (!requireOwner(brand.owner_id, userId, next)) return;
 
     const existingBranch = await prisma.branch.findUnique({
       where: { id: branchId },
-      select: { id: true, brand_id: true },
+      select: {
+        id: true,
+        brand_id: true,
+        is_24_7: true,
+        opening: true,
+        closing: true,
+      },
     });
 
     if (!existingBranch || existingBranch.brand_id !== brandId) {
-      const err: AppError = new Error();
-      err.statusCode = 404;
-      err.messageKey = 'branch.not_found';
-      return next(err);
+      return next(createError(404, 'branch.not_found'));
     }
 
     const body = req.body as UpdateBranchInput;
+    const mediaIds = [
+      ...(body.cover_media_id && body.cover_media_id !== null ? [body.cover_media_id] : []),
+      ...(body.interior_media_ids ?? []),
+    ];
+
+    if (!(await validateMediaOwnership(mediaIds, userId, next))) return;
 
     // Validate branch cover ownership + ratio when cover_media_id is being changed
     if (body.cover_media_id !== undefined) {
       if (!(await validateBranchCoverMediaOwnershipAndRatio(body.cover_media_id, userId, next))) return;
     }
 
-    // If breaks are provided, replace them entirely
-    if (body.breaks !== undefined) {
-      await prisma.branchBreak.deleteMany({ where: { branch_id: branchId } });
+    const finalIs24_7 = body.is_24_7 ?? existingBranch.is_24_7;
+    const finalOpening = finalIs24_7 ? null : (body.opening !== undefined ? body.opening : existingBranch.opening);
+    const finalClosing = finalIs24_7 ? null : (body.closing !== undefined ? body.closing : existingBranch.closing);
+
+    if (!finalIs24_7 && (!finalOpening || !finalClosing)) {
+      return next(createError(400, 'branch.availability_required'));
     }
 
-    const branch = await prisma.branch.update({
-      where: { id: branchId },
-      data: {
-        ...(body.name !== undefined && { name: body.name }),
-        ...(body.description !== undefined && { description: body.description }),
-        ...(body.address1 !== undefined && { address1: body.address1 }),
-        ...(body.address2 !== undefined && { address2: body.address2 }),
-        ...(body.phone !== undefined && { phone: body.phone }),
-        ...(body.email !== undefined && { email: body.email }),
-        ...(body.is_24_7 !== undefined && { is_24_7: body.is_24_7 }),
-        ...(body.opening !== undefined && { opening: body.opening }),
-        ...(body.closing !== undefined && { closing: body.closing }),
-        // Clear opening/closing when switching to 24/7
-        ...(body.is_24_7 === true && { opening: null, closing: null }),
-        // cover_media_id: null removes the cover; a cuid sets a new one
-        ...(body.cover_media_id !== undefined && { cover_media_id: body.cover_media_id }),
-        ...(body.breaks !== undefined &&
-          body.breaks.length > 0 && {
-            breaks: {
-              create: body.breaks.map((b) => ({ start: b.start, end: b.end })),
-            },
-          }),
-      },
-      select: branchSelect,
+    const now = new Date();
+    const branch = await prisma.$transaction(async (tx) => {
+      if (body.breaks !== undefined) {
+        await tx.branchBreak.deleteMany({ where: { branch_id: branchId } });
+      }
+
+      if (body.interior_media_ids !== undefined) {
+        await tx.branchInteriorMedia.deleteMany({ where: { branch_id: branchId } });
+      }
+
+      const updatedBranch = await tx.branch.update({
+        where: { id: branchId },
+        data: {
+          ...(body.name !== undefined && { name: body.name }),
+          ...(body.description !== undefined && { description: body.description }),
+          ...(body.address1 !== undefined && { address1: body.address1 }),
+          ...(body.address2 !== undefined && { address2: body.address2 }),
+          ...(body.city !== undefined && { city: body.city }),
+          ...(body.state !== undefined && { state: body.state }),
+          ...(body.postal_code !== undefined && { postal_code: body.postal_code }),
+          ...(body.country !== undefined && { country: body.country }),
+          ...(body.phone !== undefined && { phone: body.phone }),
+          ...(body.email !== undefined && { email: body.email }),
+          ...(body.is_24_7 !== undefined && { is_24_7: body.is_24_7 }),
+          ...(body.opening !== undefined && { opening: body.opening }),
+          ...(body.closing !== undefined && { closing: body.closing }),
+          ...(body.is_24_7 === true && { opening: null, closing: null }),
+          ...(body.cover_media_id !== undefined && { cover_media_id: body.cover_media_id }),
+          ...(body.breaks !== undefined &&
+            body.breaks.length > 0 && {
+              breaks: {
+                create: body.breaks.map((b) => ({ start: b.start, end: b.end })),
+              },
+            }),
+          ...(body.interior_media_ids !== undefined &&
+            body.interior_media_ids.length > 0 && {
+              interior_media: {
+                create: body.interior_media_ids.map((mediaId, index) => ({
+                  media_id: mediaId,
+                  order: index,
+                })),
+              },
+            }),
+        },
+        select: branchSelect,
+      });
+
+      const moderationPatch = buildBrandResubmissionPatch(brand.status, now);
+      if (Object.keys(moderationPatch).length > 0) {
+        await tx.brand.update({
+          where: { id: brandId },
+          data: moderationPatch,
+        });
+      }
+
+      return updatedBranch;
     });
 
     sendSuccess({ res, status: 200, message: 'branch.updated', data: { branch: mapBranch(branch as BranchRaw) } });
@@ -1254,12 +1580,12 @@ export const deleteBranch = async (
     const branchId = req.params['branchId'] as string;
     const userId = req.user.sub;
 
-    const brand = await prisma.brand.findUnique({ where: { id: brandId }, select: { owner_id: true } });
+    const brand = await prisma.brand.findUnique({
+      where: { id: brandId },
+      select: { owner_id: true, status: true },
+    });
     if (!brand) {
-      const err: AppError = new Error();
-      err.statusCode = 404;
-      err.messageKey = 'brand.not_found';
-      return next(err);
+      return next(createError(404, 'brand.not_found'));
     }
     if (!requireOwner(brand.owner_id, userId, next)) return;
 
@@ -1269,13 +1595,26 @@ export const deleteBranch = async (
     });
 
     if (!existingBranch || existingBranch.brand_id !== brandId) {
-      const err: AppError = new Error();
-      err.statusCode = 404;
-      err.messageKey = 'branch.not_found';
-      return next(err);
+      return next(createError(404, 'branch.not_found'));
     }
 
-    await prisma.branch.delete({ where: { id: branchId } });
+    const branchCount = await prisma.branch.count({ where: { brand_id: brandId } });
+    if (branchCount <= 1) {
+      return next(createError(400, 'brand.at_least_one_branch_required'));
+    }
+
+    const now = new Date();
+    await prisma.$transaction(async (tx) => {
+      await tx.branch.delete({ where: { id: branchId } });
+
+      const moderationPatch = buildBrandResubmissionPatch(brand.status, now);
+      if (Object.keys(moderationPatch).length > 0) {
+        await tx.brand.update({
+          where: { id: brandId },
+          data: moderationPatch,
+        });
+      }
+    });
 
     sendSuccess({ res, status: 200, message: 'branch.deleted' });
   } catch (err) {
