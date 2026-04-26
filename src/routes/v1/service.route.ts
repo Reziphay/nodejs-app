@@ -5,6 +5,7 @@ import {
   createService,
   getMyServices,
   listPublicServices,
+  listServiceCategories,
   getServiceById,
   updateService,
   deleteService,
@@ -45,6 +46,7 @@ router.post('/services/media', authenticate, upload.single('file'), uploadServic
 
 // ─── Public listing ────────────────────────────────────────────────────────────
 
+router.get('/service-categories', listServiceCategories);
 router.get('/services', listPublicServices);
 
 // ─── Authenticated routes ──────────────────────────────────────────────────────

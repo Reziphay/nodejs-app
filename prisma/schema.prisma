@@ -148,8 +148,14 @@ enum BrandTransferStatus {
 
 model BrandCategory {
   id     String  @id @default(cuid())
-  name   String  @unique
+  key    String  @unique
   brands Brand[]
+}
+
+model ServiceCategory {
+  id       String    @id @default(cuid())
+  key      String    @unique
+  services Service[]
 }
 
 model Brand {
@@ -363,28 +369,30 @@ model TeamMember {
 // ─── Service models ───────────────────────────────────────────────────────────
 
 model Service {
-  id               String        @id @default(cuid())
-  title            String
-  description      String?
-  owner_id         String
-  branch_id        String?
-  category         String?
-  price            Decimal?      @db.Decimal(10, 2)
-  price_type       PriceType     @default(FIXED)
-  duration         Int?
-  address          String?
-  status           ServiceStatus @default(DRAFT)
-  rejection_reason String?
-  created_at       DateTime      @default(now())
-  updated_at       DateTime      @updatedAt
+  id                   String        @id @default(cuid())
+  title                String
+  description          String?
+  owner_id             String
+  branch_id            String?
+  service_category_id  String?
+  price                Decimal?      @db.Decimal(10, 2)
+  price_type           PriceType     @default(FIXED)
+  duration             Int?
+  address              String?
+  status               ServiceStatus @default(DRAFT)
+  rejection_reason     String?
+  created_at           DateTime      @default(now())
+  updated_at           DateTime      @updatedAt
 
-  owner   User           @relation(fields: [owner_id], references: [id], onDelete: Cascade)
-  branch  Branch?        @relation(fields: [branch_id], references: [id], onDelete: SetNull)
-  images  ServiceMedia[]
+  owner            User             @relation(fields: [owner_id], references: [id], onDelete: Cascade)
+  branch           Branch?          @relation(fields: [branch_id], references: [id], onDelete: SetNull)
+  service_category ServiceCategory? @relation(fields: [service_category_id], references: [id], onDelete: SetNull)
+  images           ServiceMedia[]
 
   @@index([owner_id])
   @@index([branch_id])
   @@index([status])
+  @@index([service_category_id])
 }
 
 model ServiceMedia {

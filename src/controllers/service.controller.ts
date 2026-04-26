@@ -60,7 +60,8 @@ const serviceSelect = {
   description: true,
   owner_id: true,
   branch_id: true,
-  category: true,
+  service_category_id: true,
+  service_category: { select: { id: true, key: true } },
   price: true,
   price_type: true,
   duration: true,
@@ -87,7 +88,8 @@ function mapService(raw: any) {
     description: raw.description ?? undefined,
     owner_id: raw.owner_id,
     branch_id: raw.branch_id ?? null,
-    category: raw.category ?? undefined,
+    service_category_id: raw.service_category_id ?? null,
+    service_category: raw.service_category ?? null,
     price: raw.price ? Number(raw.price) : null,
     price_type: raw.price_type,
     duration: raw.duration ?? null,
@@ -105,7 +107,7 @@ function mapService(raw: any) {
   };
 }
 
-const SIGNIFICANT_FIELDS = ['title', 'description', 'price', 'price_type', 'duration', 'address', 'branch_id'] as const;
+const SIGNIFICANT_FIELDS = ['title', 'description', 'price', 'price_type', 'duration', 'address', 'branch_id', 'service_category_id'] as const;
 
 // ─── Media upload ─────────────────────────────────────────────────────────────
 
@@ -195,7 +197,7 @@ export const createService = async (
         description: body.description,
         owner_id: userId,
         branch_id: body.branch_id ?? null,
-        category: body.category,
+        service_category_id: body.service_category_id ?? null,
         price: body.price !== undefined ? body.price : null,
         price_type: body.price_type ?? 'FIXED',
         duration: body.duration ?? null,
@@ -252,14 +254,14 @@ export const listPublicServices = async (
   next: NextFunction,
 ): Promise<void> => {
   try {
-    const category = typeof req.query['category'] === 'string' ? req.query['category'] : undefined;
+    const service_category_id = typeof req.query['service_category_id'] === 'string' ? req.query['service_category_id'] : undefined;
     const branch_id = typeof req.query['branch_id'] === 'string' ? req.query['branch_id'] : undefined;
     const q = typeof req.query['q'] === 'string' ? req.query['q'] : undefined;
 
     const services = await prisma.service.findMany({
       where: {
         status: 'ACTIVE',
-        ...(category && { category }),
+        ...(service_category_id && { service_category_id }),
         ...(branch_id && { branch_id }),
         ...(q && {
           OR: [
@@ -373,7 +375,7 @@ export const updateService = async (
         ...(body.title !== undefined && { title: body.title }),
         ...(body.description !== undefined && { description: body.description }),
         ...(body.branch_id !== undefined && { branch_id: body.branch_id }),
-        ...(body.category !== undefined && { category: body.category }),
+        ...(body.service_category_id !== undefined && { service_category_id: body.service_category_id }),
         ...(body.price !== undefined && { price: body.price }),
         ...(body.price_type !== undefined && { price_type: body.price_type }),
         ...(body.duration !== undefined && { duration: body.duration }),
@@ -610,6 +612,21 @@ export const archiveService = async (
     });
 
     sendSuccess({ res, status: 200, message: 'service.archived', data: { service: mapService(service) } });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─── Service categories (public) ──────────────────────────────────────────────
+
+export const listServiceCategories = async (
+  _req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const categories = await prisma.serviceCategory.findMany({ orderBy: { key: 'asc' } });
+    sendSuccess({ res, status: 200, message: 'service.categories_list', data: { categories } });
   } catch (err) {
     next(err);
   }

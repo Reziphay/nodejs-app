@@ -198,6 +198,7 @@ export async function getServiceModerationDetail(serviceId: string) {
           brand: { select: { id: true, name: true } },
         },
       },
+      service_category: { select: { id: true, key: true } },
     },
   });
 
@@ -209,7 +210,8 @@ export async function getServiceModerationDetail(serviceId: string) {
     description: service.description ?? undefined,
     status: service.status,
     rejection_reason: service.rejection_reason ?? undefined,
-    category: service.category ?? undefined,
+    service_category_id: service.service_category_id ?? null,
+    service_category: service.service_category ?? null,
     price: service.price ? Number(service.price) : null,
     price_type: service.price_type,
     duration: service.duration ?? undefined,
