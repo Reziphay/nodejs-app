@@ -5,7 +5,7 @@ import { AppError } from '../middlewares/error.middleware';
 import { buildFileUrl } from '../services/storage.service';
 import { validateAndProcessImage, writeFileToDisk } from '../services/media.service';
 import { buildStoragePath, ensureUserStorageDir } from '../services/storage.service';
-import type { CreateServiceInput, UpdateServiceInput, RejectServiceInput } from '../schemas/service.schema';
+import type { CreateServiceInput, UpdateServiceInput } from '../schemas/service.schema';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -615,97 +615,3 @@ export const archiveService = async (
   }
 };
 
-// ─── Moderation (admin) ───────────────────────────────────────────────────────
-
-export const approveService = async (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-): Promise<void> => {
-  try {
-    if (req.user.type !== 'admin') {
-      const err: AppError = new Error();
-      err.statusCode = 403;
-      err.messageKey = 'errors.forbidden';
-      return next(err);
-    }
-
-    const id = req.params['id'] as string;
-
-    const existing = await prisma.service.findUnique({
-      where: { id },
-      select: { status: true },
-    });
-
-    if (!existing) {
-      const err: AppError = new Error();
-      err.statusCode = 404;
-      err.messageKey = 'service.not_found';
-      return next(err);
-    }
-
-    if (existing.status !== 'PENDING') {
-      const err: AppError = new Error();
-      err.statusCode = 400;
-      err.messageKey = 'service.cannot_approve_in_current_status';
-      return next(err);
-    }
-
-    const service = await prisma.service.update({
-      where: { id },
-      data: { status: 'ACTIVE', rejection_reason: null },
-      select: serviceSelect,
-    });
-
-    sendSuccess({ res, status: 200, message: 'service.approved', data: { service: mapService(service) } });
-  } catch (err) {
-    next(err);
-  }
-};
-
-export const rejectService = async (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-): Promise<void> => {
-  try {
-    if (req.user.type !== 'admin') {
-      const err: AppError = new Error();
-      err.statusCode = 403;
-      err.messageKey = 'errors.forbidden';
-      return next(err);
-    }
-
-    const id = req.params['id'] as string;
-    const body = req.body as RejectServiceInput;
-
-    const existing = await prisma.service.findUnique({
-      where: { id },
-      select: { status: true },
-    });
-
-    if (!existing) {
-      const err: AppError = new Error();
-      err.statusCode = 404;
-      err.messageKey = 'service.not_found';
-      return next(err);
-    }
-
-    if (existing.status !== 'PENDING') {
-      const err: AppError = new Error();
-      err.statusCode = 400;
-      err.messageKey = 'service.cannot_reject_in_current_status';
-      return next(err);
-    }
-
-    const service = await prisma.service.update({
-      where: { id },
-      data: { status: 'REJECTED', rejection_reason: body.rejection_reason },
-      select: serviceSelect,
-    });
-
-    sendSuccess({ res, status: 200, message: 'service.rejected', data: { service: mapService(service) } });
-  } catch (err) {
-    next(err);
-  }
-};
