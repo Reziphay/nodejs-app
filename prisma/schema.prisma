@@ -32,22 +32,6 @@ enum MediaKind {
   document
   branch_cover
   other
-  service_image
-}
-
-enum ServiceStatus {
-  DRAFT
-  PENDING
-  ACTIVE
-  REJECTED
-  PAUSED
-  ARCHIVED
-}
-
-enum PriceType {
-  FIXED
-  STARTING_FROM
-  FREE
 }
 
 model User {
@@ -73,7 +57,6 @@ model User {
   refresh_tokens       RefreshToken[]
   media                Media[]
   brands               Brand[]
-  services             Service[]
   brand_transfers      BrandTransfer[] @relation("BrandTransferRequester")
   received_transfers   BrandTransfer[] @relation("BrandTransferRecipient")
   brand_ratings        BrandRating[]
@@ -112,7 +95,6 @@ model Media {
   brand_logo    Brand[]        @relation("BrandLogo")
   brand_gallery BrandGallery[] @relation("BrandGallery")
   branch_covers Branch[]       @relation("BranchCover")
-  service_images ServiceMedia[]
 
   @@index([owner_id])
 }
@@ -193,7 +175,6 @@ model Branch {
   breaks      BranchBreak[]
   team        Team?         @relation("BranchTeam")
   cover_media Media?        @relation("BranchCover", fields: [cover_media_id], references: [id], onDelete: SetNull)
-  services    Service[]
 
   @@index([brand_id])
 }
@@ -345,43 +326,4 @@ model TeamMember {
   @@unique([team_id, user_id])
   @@index([team_id])
   @@index([user_id])
-}
-
-// ─── Service models ───────────────────────────────────────────────────────────
-
-model Service {
-  id               String        @id @default(cuid())
-  title            String
-  description      String?
-  owner_id         String
-  branch_id        String?
-  category         String?
-  price            Decimal?      @db.Decimal(10, 2)
-  price_type       PriceType     @default(FIXED)
-  duration         Int?
-  address          String?
-  status           ServiceStatus @default(DRAFT)
-  rejection_reason String?
-  created_at       DateTime      @default(now())
-  updated_at       DateTime      @updatedAt
-
-  owner   User           @relation(fields: [owner_id], references: [id], onDelete: Cascade)
-  branch  Branch?        @relation(fields: [branch_id], references: [id], onDelete: SetNull)
-  images  ServiceMedia[]
-
-  @@index([owner_id])
-  @@index([branch_id])
-  @@index([status])
-}
-
-model ServiceMedia {
-  id         String @id @default(cuid())
-  service_id String
-  media_id   String
-  order      Int    @default(0)
-
-  service Service @relation(fields: [service_id], references: [id], onDelete: Cascade)
-  media   Media   @relation(fields: [media_id], references: [id], onDelete: Cascade)
-
-  @@index([service_id])
 }
