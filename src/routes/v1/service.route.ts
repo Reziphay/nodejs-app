@@ -5,6 +5,7 @@ import {
   createService,
   getMyServices,
   listPublicServices,
+  listServiceCategories,
   getServiceById,
   updateService,
   deleteService,
@@ -12,8 +13,6 @@ import {
   pauseService,
   resumeService,
   archiveService,
-  approveService,
-  rejectService,
 } from '../../controllers/service.controller';
 import { authenticate } from '../../middlewares/auth.middleware';
 import { validate } from '../../middlewares/validate.middleware';
@@ -21,7 +20,6 @@ import { AppError } from '../../middlewares/error.middleware';
 import {
   createServiceSchema,
   updateServiceSchema,
-  rejectServiceSchema,
 } from '../../schemas/service.schema';
 
 const upload = multer({
@@ -48,6 +46,7 @@ router.post('/services/media', authenticate, upload.single('file'), uploadServic
 
 // ─── Public listing ────────────────────────────────────────────────────────────
 
+router.get('/service-categories', listServiceCategories);
 router.get('/services', listPublicServices);
 
 // ─── Authenticated routes ──────────────────────────────────────────────────────
@@ -64,10 +63,5 @@ router.post('/services/:id/submit', authenticate, submitService);
 router.post('/services/:id/pause', authenticate, pauseService);
 router.post('/services/:id/resume', authenticate, resumeService);
 router.post('/services/:id/archive', authenticate, archiveService);
-
-// ─── Moderation (admin) ────────────────────────────────────────────────────────
-
-router.post('/services/:id/approve', authenticate, approveService);
-router.post('/services/:id/reject', authenticate, validate(rejectServiceSchema), rejectService);
 
 export default router;

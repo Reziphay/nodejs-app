@@ -135,7 +135,7 @@ const brandSelect = {
   logo_media_id: true,
   created_at: true,
   updated_at: true,
-  categories: { select: { id: true, name: true } },
+  categories: { select: { id: true, key: true } },
   logo_media: { select: { id: true, storage_path: true } },
   gallery: {
     select: {
@@ -155,7 +155,7 @@ const brandSelect = {
 } as const;
 
 type BrandRaw = Awaited<ReturnType<typeof prisma.brand.findUniqueOrThrow>> & {
-  categories: { id: string; name: string }[];
+  categories: { id: string; key: string }[];
   logo_media: { id: string; storage_path: string } | null;
   gallery: { id: string; media_id: string; order: number; media: { id: string; storage_path: string } }[];
   ratings: { value: number; user_id: string }[];
@@ -1283,7 +1283,7 @@ export const listCategories = async (
 ): Promise<void> => {
   try {
     const categories = await prisma.brandCategory.findMany({
-      orderBy: { name: 'asc' },
+      orderBy: { key: 'asc' },
     });
 
     sendSuccess({ res, status: 200, message: 'brand.categories_list', data: { categories } });

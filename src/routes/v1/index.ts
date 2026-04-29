@@ -7,6 +7,7 @@ import brandRoute from './brand.route';
 import notificationRoute from './notification.route';
 import teamRoute from './team.route';
 import serviceRoute from './service.route';
+import moderationRoute from './moderation.route';
 
 const router: Router = Router();
 
@@ -18,5 +19,6 @@ router.use('/', brandRoute);
 router.use('/notifications', notificationRoute);
 router.use('/', teamRoute);
 router.use('/', serviceRoute);
+router.use('/', moderationRoute);
 
 export default router;
