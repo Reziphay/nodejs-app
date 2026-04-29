@@ -346,8 +346,8 @@ export const updateService = async (
 
     const { status } = existing;
 
-    // PAUSED, ARCHIVED, PENDING cannot be edited
-    if (status === 'PAUSED' || status === 'ARCHIVED' || status === 'PENDING') {
+    // ARCHIVED and PENDING cannot be edited
+    if (status === 'ARCHIVED' || status === 'PENDING') {
       const err: AppError = new Error();
       err.statusCode = 400;
       err.messageKey = 'service.cannot_update_in_current_status';
@@ -466,7 +466,11 @@ export const submitService = async (
 
     if (!requireOwner(existing.owner_id, userId, next)) return;
 
-    if (existing.status !== 'DRAFT' && existing.status !== 'REJECTED') {
+    if (
+      existing.status !== 'DRAFT' &&
+      existing.status !== 'REJECTED' &&
+      existing.status !== 'PAUSED'
+    ) {
       const err: AppError = new Error();
       err.statusCode = 400;
       err.messageKey = 'service.cannot_submit_in_current_status';
