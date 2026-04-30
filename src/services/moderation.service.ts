@@ -46,7 +46,7 @@ export async function getModerationQueue(type?: 'brand' | 'service') {
             title: true,
             description: true,
             status: true,
-            category: true,
+            service_category: { select: { id: true, key: true } },
             price: true,
             price_type: true,
             created_at: true,
@@ -64,9 +64,10 @@ export async function getModerationQueue(type?: 'brand' | 'service') {
         }),
   ]);
 
-  return {
-    brands: brands.map((b) => ({
+  const brandItems = brands.map((b) => ({
       id: b.id,
+      type: 'brand' as const,
+      title: b.name,
       name: b.name,
       description: b.description ?? undefined,
       status: b.status,
@@ -74,19 +75,28 @@ export async function getModerationQueue(type?: 'brand' | 'service') {
       owner: b.owner,
       created_at: b.created_at.toISOString(),
       updated_at: b.updated_at.toISOString(),
-    })),
-    services: services.map((s) => ({
+    }));
+
+  const serviceItems = services.map((s) => ({
       id: s.id,
+      type: 'service' as const,
       title: s.title,
       description: s.description ?? undefined,
       status: s.status,
-      category: s.category ?? undefined,
+      service_category: s.service_category ?? null,
       price: s.price ? Number(s.price) : null,
       price_type: s.price_type,
       owner: s.owner,
       created_at: s.created_at.toISOString(),
       updated_at: s.updated_at.toISOString(),
-    })),
+    }));
+
+  return {
+    items: [...brandItems, ...serviceItems].sort((a, b) =>
+      a.created_at.localeCompare(b.created_at),
+    ),
+    brands: brandItems,
+    services: serviceItems,
   };
 }
 
