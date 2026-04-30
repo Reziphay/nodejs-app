@@ -1,6 +1,15 @@
 import { z } from 'zod';
 
-const socialUrlField = z.string().url('Invalid URL').max(500).nullable().optional();
+const socialUrlField = z
+  .string()
+  .url('Invalid URL')
+  .max(500)
+  .refine(
+    (url) => url.startsWith('https://') || url.startsWith('http://'),
+    'URL must use https:// or http://',
+  )
+  .nullable()
+  .optional();
 
 export const updateMeSchema = z.object({
   first_name: z.string().min(2, 'First name must be at least 2 characters').max(50).trim(),

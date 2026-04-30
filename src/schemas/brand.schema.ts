@@ -59,7 +59,16 @@ export type UpdateBranchInput = z.infer<typeof updateBranchSchema>;
 
 // ─── Brand ────────────────────────────────────────────────────────────────────
 
-const socialUrlSchema = z.string().url('Invalid URL').max(500).nullable().optional();
+const socialUrlSchema = z
+  .string()
+  .url('Invalid URL')
+  .max(500)
+  .refine(
+    (url) => url.startsWith('https://') || url.startsWith('http://'),
+    'URL must use https:// or http://',
+  )
+  .nullable()
+  .optional();
 
 const socialLinksShape = {
   instagram_url: socialUrlSchema,
