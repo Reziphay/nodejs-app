@@ -59,6 +59,18 @@ export type UpdateBranchInput = z.infer<typeof updateBranchSchema>;
 
 // ─── Brand ────────────────────────────────────────────────────────────────────
 
+const socialUrlSchema = z.string().url('Invalid URL').max(500).nullable().optional();
+
+const socialLinksShape = {
+  instagram_url: socialUrlSchema,
+  facebook_url:  socialUrlSchema,
+  youtube_url:   socialUrlSchema,
+  whatsapp_url:  socialUrlSchema,
+  linkedin_url:  socialUrlSchema,
+  x_url:         socialUrlSchema,
+  website_url:   socialUrlSchema,
+};
+
 export const createBrandSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters').max(100).trim(),
   description: z.string().max(1000).trim().optional(),
@@ -66,6 +78,7 @@ export const createBrandSchema = z.object({
   logo_media_id: z.string().cuid('Invalid media id').optional(),
   gallery_media_ids: z.array(z.string().cuid('Invalid media id')).optional().default([]),
   branches: z.array(createBranchSchema).optional().default([]),
+  ...socialLinksShape,
 });
 
 export type CreateBrandInput = z.infer<typeof createBrandSchema>;
@@ -76,6 +89,7 @@ export const updateBrandSchema = z.object({
   categoryIds: z.array(z.string().cuid('Invalid category id')).optional(),
   logo_media_id: z.string().cuid('Invalid media id').nullable().optional(),
   gallery_media_ids: z.array(z.string().cuid('Invalid media id')).optional(),
+  ...socialLinksShape,
 });
 
 export type UpdateBrandInput = z.infer<typeof updateBrandSchema>;

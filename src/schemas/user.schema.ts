@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+const socialUrlField = z.string().url('Invalid URL').max(500).nullable().optional();
+
 export const updateMeSchema = z.object({
   first_name: z.string().min(2, 'First name must be at least 2 characters').max(50).trim(),
   last_name: z.string().min(2, 'Last name must be at least 2 characters').max(50).trim(),
@@ -21,6 +23,13 @@ export const updateMeSchema = z.object({
     .regex(/^\+\d{7,15}$/, 'Phone must be in E.164 format, e.g. +9941234567')
     .nullable()
     .optional(),
+  instagram_url: socialUrlField,
+  facebook_url:  socialUrlField,
+  youtube_url:   socialUrlField,
+  whatsapp_url:  socialUrlField,
+  linkedin_url:  socialUrlField,
+  x_url:         socialUrlField,
+  website_url:   socialUrlField,
 });
 
 export type UpdateMeInput = z.infer<typeof updateMeSchema>;

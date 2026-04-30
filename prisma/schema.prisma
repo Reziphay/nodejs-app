@@ -78,6 +78,13 @@ model User {
   phone_verified   Boolean   @default(false)
   email_verified   Boolean   @default(false)
   avatar_media_id  String?
+  instagram_url    String?
+  facebook_url     String?
+  youtube_url      String?
+  whatsapp_url     String?
+  linkedin_url     String?
+  x_url            String?
+  website_url      String?
 
   created_at  DateTime @default(now())
   updated_at  DateTime @updatedAt
@@ -165,6 +172,13 @@ model Brand {
   status        BrandStatus @default(PENDING)
   owner_id      String
   logo_media_id String?
+  instagram_url String?
+  facebook_url  String?
+  youtube_url   String?
+  whatsapp_url  String?
+  linkedin_url  String?
+  x_url         String?
+  website_url   String?
   created_at    DateTime    @default(now())
   updated_at    DateTime    @updatedAt
 
