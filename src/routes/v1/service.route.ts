@@ -13,6 +13,7 @@ import {
   pauseService,
   resumeService,
   archiveService,
+  unarchiveService,
 } from '../../controllers/service.controller';
 import { authenticate } from '../../middlewares/auth.middleware';
 import { validate } from '../../middlewares/validate.middleware';
@@ -63,5 +64,6 @@ router.post('/services/:id/submit', authenticate, submitService);
 router.post('/services/:id/pause', authenticate, pauseService);
 router.post('/services/:id/resume', authenticate, resumeService);
 router.post('/services/:id/archive', authenticate, archiveService);
+router.post('/services/:id/unarchive', authenticate, unarchiveService);
 
 export default router;

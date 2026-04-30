@@ -621,6 +621,50 @@ export const archiveService = async (
   }
 };
 
+export const unarchiveService = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    if (!requireUso(req, next)) return;
+
+    const id = req.params['id'] as string;
+    const userId = req.user.sub;
+
+    const existing = await prisma.service.findUnique({
+      where: { id },
+      select: { owner_id: true, status: true },
+    });
+
+    if (!existing) {
+      const err: AppError = new Error();
+      err.statusCode = 404;
+      err.messageKey = 'service.not_found';
+      return next(err);
+    }
+
+    if (!requireOwner(existing.owner_id, userId, next)) return;
+
+    if (existing.status !== 'ARCHIVED') {
+      const err: AppError = new Error();
+      err.statusCode = 400;
+      err.messageKey = 'service.cannot_unarchive_in_current_status';
+      return next(err);
+    }
+
+    const service = await prisma.service.update({
+      where: { id },
+      data: { status: 'DRAFT' },
+      select: serviceSelect,
+    });
+
+    sendSuccess({ res, status: 200, message: 'service.unarchived', data: { service: mapService(service) } });
+  } catch (err) {
+    next(err);
+  }
+};
+
 // ─── Service categories (public) ──────────────────────────────────────────────
 
 export const listServiceCategories = async (
