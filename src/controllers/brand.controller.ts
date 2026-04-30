@@ -484,10 +484,11 @@ export const getBrandById = async (
       return next(err);
     }
 
-    // Non-ACTIVE brands are only visible to their owner
+    // Non-ACTIVE brands are visible to their owner and admins.
     if (brand.status !== 'ACTIVE') {
       const userId = req.user?.sub;
-      if (!userId || brand.owner_id !== userId) {
+      const isAdmin = req.user?.type === 'admin';
+      if (!isAdmin && (!userId || brand.owner_id !== userId)) {
         const err: AppError = new Error();
         err.statusCode = 404;
         err.messageKey = 'brand.not_found';
