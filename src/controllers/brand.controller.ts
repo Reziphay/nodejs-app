@@ -501,7 +501,7 @@ export const updateBrand = async (
     const id = req.params['id'] as string;
     const userId = req.user.sub;
 
-    const existing = await prisma.brand.findUnique({ where: { id }, select: { owner_id: true } });
+    const existing = await prisma.brand.findUnique({ where: { id }, select: { owner_id: true, status: true } });
     if (!existing) {
       const err: AppError = new Error();
       err.statusCode = 404;
@@ -509,6 +509,10 @@ export const updateBrand = async (
       return next(err);
     }
     if (!requireOwner(existing.owner_id, userId, next)) return;
+
+    // Editing an ACTIVE or REJECTED brand resets it to PENDING for re-review.
+    // PENDING stays PENDING; CLOSED is immutable.
+    const shouldResetToPending = existing.status === 'ACTIVE' || existing.status === 'REJECTED';
 
     const body = req.body as UpdateBrandInput;
 
@@ -539,6 +543,7 @@ export const updateBrand = async (
     const brand = await prisma.brand.update({
       where: { id },
       data: {
+        ...(shouldResetToPending && { status: 'PENDING' }),
         ...(body.name !== undefined && { name: body.name }),
         ...(body.description !== undefined && { description: body.description }),
         // logo_media_id can be set to null (removal) or a new id; skip if not in payload
