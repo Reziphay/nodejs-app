@@ -290,6 +290,8 @@ export const listPublicServices = async (
   try {
     const service_category_id = typeof req.query['service_category_id'] === 'string' ? req.query['service_category_id'] : undefined;
     const branch_id = typeof req.query['branch_id'] === 'string' ? req.query['branch_id'] : undefined;
+    const owner_id = typeof req.query['owner_id'] === 'string' ? req.query['owner_id'] : undefined;
+    const direct_only = req.query['direct_only'] === 'true';
     const q = typeof req.query['q'] === 'string' ? req.query['q'] : undefined;
 
     const services = await prisma.service.findMany({
@@ -297,6 +299,8 @@ export const listPublicServices = async (
         status: 'ACTIVE',
         ...(service_category_id && { service_category_id }),
         ...(branch_id && { branch_id }),
+        ...(owner_id && { owner_id }),
+        ...(direct_only && { branch_id: null }),
         ...(q && {
           OR: [
             { title: { contains: q, mode: 'insensitive' } },
