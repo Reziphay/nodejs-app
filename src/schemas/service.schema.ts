@@ -36,3 +36,9 @@ export const rejectServiceSchema = z.object({
 });
 
 export type RejectServiceInput = z.infer<typeof rejectServiceSchema>;
+
+export const upsertServiceRatingSchema = z.object({
+  value: z.number().int().min(1).max(5),
+});
+
+export type UpsertServiceRatingInput = z.infer<typeof upsertServiceRatingSchema>;

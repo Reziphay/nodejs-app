@@ -96,6 +96,7 @@ model User {
   brand_transfers      BrandTransfer[] @relation("BrandTransferRequester")
   received_transfers   BrandTransfer[] @relation("BrandTransferRecipient")
   brand_ratings        BrandRating[]
+  service_ratings      ServiceRating[]
   notifications        Notification[]
   teams_created             Team[]                       @relation("TeamCreator")
   team_memberships          TeamMember[]                 @relation("TeamMemberUser")
@@ -402,11 +403,28 @@ model Service {
   branch           Branch?          @relation(fields: [branch_id], references: [id], onDelete: SetNull)
   service_category ServiceCategory? @relation(fields: [service_category_id], references: [id], onDelete: SetNull)
   images           ServiceMedia[]
+  ratings          ServiceRating[]
 
   @@index([owner_id])
   @@index([branch_id])
   @@index([status])
   @@index([service_category_id])
+}
+
+model ServiceRating {
+  id         String   @id @default(cuid())
+  service_id String
+  user_id    String
+  value      Int
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  service Service @relation(fields: [service_id], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([service_id, user_id])
+  @@index([service_id])
+  @@index([user_id])
 }
 
 model ServiceMedia {

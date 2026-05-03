@@ -14,12 +14,14 @@ import {
   resumeService,
   archiveService,
   unarchiveService,
+  upsertServiceRating,
 } from '../../controllers/service.controller';
 import { authenticate } from '../../middlewares/auth.middleware';
 import { validate } from '../../middlewares/validate.middleware';
 import { AppError } from '../../middlewares/error.middleware';
 import {
   createServiceSchema,
+  upsertServiceRatingSchema,
   updateServiceSchema,
 } from '../../schemas/service.schema';
 
@@ -65,5 +67,6 @@ router.post('/services/:id/pause', authenticate, pauseService);
 router.post('/services/:id/resume', authenticate, resumeService);
 router.post('/services/:id/archive', authenticate, archiveService);
 router.post('/services/:id/unarchive', authenticate, unarchiveService);
+router.put('/services/:id/rating', authenticate, validate(upsertServiceRatingSchema), upsertServiceRating);
 
 export default router;

@@ -5,12 +5,23 @@ import { AppError } from '../middlewares/error.middleware';
 import { buildFileUrl } from '../services/storage.service';
 import { validateAndProcessImage, writeFileToDisk } from '../services/media.service';
 import { buildStoragePath, ensureUserStorageDir } from '../services/storage.service';
-import type { CreateServiceInput, UpdateServiceInput } from '../schemas/service.schema';
+import type { CreateServiceInput, UpdateServiceInput, UpsertServiceRatingInput } from '../schemas/service.schema';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function requireUso(req: Request, next: NextFunction): boolean {
   if (req.user.type !== 'uso') {
+    const err: AppError = new Error();
+    err.statusCode = 403;
+    err.messageKey = 'errors.forbidden';
+    next(err);
+    return false;
+  }
+  return true;
+}
+
+function requireUcr(req: Request, next: NextFunction): boolean {
+  if (req.user.type !== 'ucr') {
     const err: AppError = new Error();
     err.statusCode = 403;
     err.messageKey = 'errors.forbidden';
@@ -79,9 +90,29 @@ const serviceSelect = {
     },
     orderBy: { order: 'asc' as const },
   },
+  ratings: {
+    select: {
+      value: true,
+      user_id: true,
+    },
+  },
 } as const;
 
-function mapService(raw: any) {
+function roundRating(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+function mapService(raw: any, requesterId?: string) {
+  const ratingCount = raw.ratings?.length ?? 0;
+  const ratingAverage =
+    ratingCount > 0
+      ? roundRating(raw.ratings.reduce((sum: number, rating: { value: number }) => sum + rating.value, 0) / ratingCount)
+      : null;
+  const myRating =
+    requesterId
+      ? raw.ratings?.find((rating: { user_id: string }) => rating.user_id === requesterId)?.value ?? null
+      : null;
+
   return {
     id: raw.id,
     title: raw.title,
@@ -102,6 +133,9 @@ function mapService(raw: any) {
       order: img.order,
       url: buildFileUrl(img.media.storage_path),
     })),
+    rating: ratingAverage,
+    rating_count: ratingCount,
+    my_rating: myRating,
     created_at: raw.created_at.toISOString(),
     updated_at: raw.updated_at.toISOString(),
   };
@@ -216,7 +250,7 @@ export const createService = async (
       select: serviceSelect,
     });
 
-    sendSuccess({ res, status: 201, message: 'service.created', data: { service: mapService(service) } });
+    sendSuccess({ res, status: 201, message: 'service.created', data: { service: mapService(service, userId) } });
   } catch (err) {
     next(err);
   }
@@ -240,7 +274,7 @@ export const getMyServices = async (
       orderBy: { created_at: 'desc' },
     });
 
-    sendSuccess({ res, status: 200, message: 'service.list', data: { services: services.map(mapService) } });
+    sendSuccess({ res, status: 200, message: 'service.list', data: { services: services.map((service) => mapService(service, userId)) } });
   } catch (err) {
     next(err);
   }
@@ -274,7 +308,7 @@ export const listPublicServices = async (
       orderBy: { created_at: 'desc' },
     });
 
-    sendSuccess({ res, status: 200, message: 'service.list', data: { services: services.map(mapService) } });
+    sendSuccess({ res, status: 200, message: 'service.list', data: { services: services.map((service) => mapService(service)) } });
   } catch (err) {
     next(err);
   }
@@ -310,7 +344,71 @@ export const getServiceById = async (
       }
     }
 
-    sendSuccess({ res, status: 200, message: 'service.found', data: { service: mapService(service) } });
+    sendSuccess({ res, status: 200, message: 'service.found', data: { service: mapService(service, req.user?.sub) } });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─── Rating ──────────────────────────────────────────────────────────────────
+
+export const upsertServiceRating = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    if (!requireUcr(req, next)) return;
+
+    const id = req.params['id'] as string;
+    const userId = req.user.sub;
+    const body = req.body as UpsertServiceRatingInput;
+
+    const service = await prisma.service.findUnique({
+      where: { id },
+      select: { id: true, status: true },
+    });
+
+    if (!service || service.status !== 'ACTIVE') {
+      const err: AppError = new Error();
+      err.statusCode = 404;
+      err.messageKey = 'service.not_found';
+      return next(err);
+    }
+
+    await prisma.serviceRating.upsert({
+      where: {
+        service_id_user_id: {
+          service_id: id,
+          user_id: userId,
+        },
+      },
+      update: { value: body.value },
+      create: {
+        service_id: id,
+        user_id: userId,
+        value: body.value,
+      },
+    });
+
+    const updatedService = await prisma.service.findUnique({
+      where: { id },
+      select: serviceSelect,
+    });
+
+    if (!updatedService) {
+      const err: AppError = new Error();
+      err.statusCode = 404;
+      err.messageKey = 'service.not_found';
+      return next(err);
+    }
+
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'service.rating_saved',
+      data: { service: mapService(updatedService, userId) },
+    });
   } catch (err) {
     next(err);
   }
@@ -679,4 +777,3 @@ export const listServiceCategories = async (
     next(err);
   }
 };
-
