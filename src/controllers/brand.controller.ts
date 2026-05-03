@@ -647,10 +647,12 @@ export const listPublicBrands = async (
 ): Promise<void> => {
   try {
     const accountId = typeof req.query['account'] === 'string' ? req.query['account'] : undefined;
+    const brandCategoryId = typeof req.query['brand_category_id'] === 'string' ? req.query['brand_category_id'] : undefined;
 
     if (accountId) {
       // Public account view: ACTIVE first (newest-first), then CLOSED (newest-first).
       // PENDING, REJECTED and any other non-public statuses are intentionally excluded.
+      // brand_category_id filter is not applied in account view.
       const [activeBrands, closedBrands] = await Promise.all([
         prisma.brand.findMany({
           where: { owner_id: accountId, status: 'ACTIVE' },
@@ -669,9 +671,12 @@ export const listPublicBrands = async (
       return;
     }
 
-    // Default public gallery: active brands only.
+    // Default public gallery: active brands only, optionally filtered by category.
     const brands = await prisma.brand.findMany({
-      where: { status: 'ACTIVE' },
+      where: {
+        status: 'ACTIVE',
+        ...(brandCategoryId && { categories: { some: { id: brandCategoryId } } }),
+      },
       select: brandSelect,
       orderBy: { created_at: 'desc' },
     });
