@@ -293,26 +293,48 @@ export const listPublicServices = async (
     const owner_id = typeof req.query['owner_id'] === 'string' ? req.query['owner_id'] : undefined;
     const direct_only = req.query['direct_only'] === 'true';
     const q = typeof req.query['q'] === 'string' ? req.query['q'] : undefined;
+    const page = Math.max(1, Number.parseInt(String(req.query['page'] ?? '1'), 10) || 1);
+    const limit = Math.min(60, Math.max(1, Number.parseInt(String(req.query['limit'] ?? '60'), 10) || 60));
+    const skip = (page - 1) * limit;
+    const where = {
+      status: 'ACTIVE' as const,
+      ...(service_category_id && { service_category_id }),
+      ...(branch_id && { branch_id }),
+      ...(owner_id && { owner_id }),
+      ...(direct_only && { branch_id: null }),
+      ...(q && {
+        OR: [
+          { title: { contains: q, mode: 'insensitive' as const } },
+          { description: { contains: q, mode: 'insensitive' as const } },
+        ],
+      }),
+    };
 
-    const services = await prisma.service.findMany({
-      where: {
-        status: 'ACTIVE',
-        ...(service_category_id && { service_category_id }),
-        ...(branch_id && { branch_id }),
-        ...(owner_id && { owner_id }),
-        ...(direct_only && { branch_id: null }),
-        ...(q && {
-          OR: [
-            { title: { contains: q, mode: 'insensitive' } },
-            { description: { contains: q, mode: 'insensitive' } },
-          ],
-        }),
+    const [services, totalCount] = await Promise.all([
+      prisma.service.findMany({
+        where,
+        select: serviceSelect,
+        orderBy: { created_at: 'desc' },
+        skip,
+        take: limit,
+      }),
+      prisma.service.count({ where }),
+    ]);
+
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'service.list',
+      data: {
+        services: services.map((service) => mapService(service)),
+        meta: {
+          page,
+          limit,
+          total_count: totalCount,
+          has_more: skip + services.length < totalCount,
+        },
       },
-      select: serviceSelect,
-      orderBy: { created_at: 'desc' },
     });
-
-    sendSuccess({ res, status: 200, message: 'service.list', data: { services: services.map((service) => mapService(service)) } });
   } catch (err) {
     next(err);
   }

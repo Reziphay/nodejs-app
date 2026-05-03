@@ -648,6 +648,9 @@ export const listPublicBrands = async (
   try {
     const accountId = typeof req.query['account'] === 'string' ? req.query['account'] : undefined;
     const brandCategoryId = typeof req.query['brand_category_id'] === 'string' ? req.query['brand_category_id'] : undefined;
+    const page = Math.max(1, Number.parseInt(String(req.query['page'] ?? '1'), 10) || 1);
+    const limit = Math.min(60, Math.max(1, Number.parseInt(String(req.query['limit'] ?? '60'), 10) || 60));
+    const skip = (page - 1) * limit;
 
     if (accountId) {
       // Public account view: ACTIVE first (newest-first), then CLOSED (newest-first).
@@ -672,16 +675,35 @@ export const listPublicBrands = async (
     }
 
     // Default public gallery: active brands only, optionally filtered by category.
-    const brands = await prisma.brand.findMany({
-      where: {
-        status: 'ACTIVE',
-        ...(brandCategoryId && { categories: { some: { id: brandCategoryId } } }),
-      },
-      select: brandSelect,
-      orderBy: { created_at: 'desc' },
-    });
+    const where = {
+      status: 'ACTIVE' as const,
+      ...(brandCategoryId && { categories: { some: { id: brandCategoryId } } }),
+    };
+    const [brands, totalCount] = await Promise.all([
+      prisma.brand.findMany({
+        where,
+        select: brandSelect,
+        orderBy: { created_at: 'desc' },
+        skip,
+        take: limit,
+      }),
+      prisma.brand.count({ where }),
+    ]);
 
-    sendSuccess({ res, status: 200, message: 'brand.list', data: { brands: brands.map((b) => mapBrand(b as BrandRaw)) } });
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'brand.list',
+      data: {
+        brands: brands.map((b) => mapBrand(b as BrandRaw)),
+        meta: {
+          page,
+          limit,
+          total_count: totalCount,
+          has_more: skip + brands.length < totalCount,
+        },
+      },
+    });
   } catch (err) {
     next(err);
   }
