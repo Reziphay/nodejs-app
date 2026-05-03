@@ -97,6 +97,8 @@ model User {
   received_transfers   BrandTransfer[] @relation("BrandTransferRecipient")
   brand_ratings        BrandRating[]
   service_ratings      ServiceRating[]
+  favorite_brands      FavoriteBrand[]
+  favorite_services    FavoriteService[]
   notifications        Notification[]
   teams_created             Team[]                       @relation("TeamCreator")
   team_memberships          TeamMember[]                 @relation("TeamMemberUser")
@@ -189,6 +191,7 @@ model Brand {
   branches   Branch[]
   categories BrandCategory[]
   ratings    BrandRating[]
+  favorites  FavoriteBrand[]
   transfers  BrandTransfer[]
 
   @@index([owner_id])
@@ -404,6 +407,7 @@ model Service {
   service_category ServiceCategory? @relation(fields: [service_category_id], references: [id], onDelete: SetNull)
   images           ServiceMedia[]
   ratings          ServiceRating[]
+  favorites        FavoriteService[]
 
   @@index([owner_id])
   @@index([branch_id])
@@ -425,6 +429,34 @@ model ServiceRating {
   @@unique([service_id, user_id])
   @@index([service_id])
   @@index([user_id])
+}
+
+model FavoriteBrand {
+  id         String   @id @default(cuid())
+  user_id    String
+  brand_id   String
+  created_at DateTime @default(now())
+
+  user  User  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  brand Brand @relation(fields: [brand_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, brand_id])
+  @@index([user_id, created_at])
+  @@index([brand_id])
+}
+
+model FavoriteService {
+  id         String   @id @default(cuid())
+  user_id    String
+  service_id String
+  created_at DateTime @default(now())
+
+  user    User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  service Service @relation(fields: [service_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, service_id])
+  @@index([user_id, created_at])
+  @@index([service_id])
 }
 
 model ServiceMedia {

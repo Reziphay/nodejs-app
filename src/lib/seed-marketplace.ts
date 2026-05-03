@@ -48,6 +48,7 @@ interface UserSeedDef {
   first_name: string;
   last_name: string;
   phone: string;
+  has_brand: boolean;
   brand_name: string;
   brand_description: string;
   brand_category_keys: string[];
@@ -59,7 +60,7 @@ interface UserSeedDef {
 
 type SeededMarketplaceOwner = {
   userId: string;
-  brandId: string;
+  brandId?: string;
   serviceIds: string[];
 };
 
@@ -170,28 +171,39 @@ function bakuBranches(domain: string): BranchDef[] {
   }));
 }
 
-const USER_PROFILES = [
-  ['Aylin', 'Karimova'],
-  ['Murad', 'Aliyev'],
-  ['Leyla', 'Mammadova'],
-  ['Orkhan', 'Hasanov'],
-  ['Nigar', 'Huseynova'],
-  ['Rauf', 'Mammadli'],
-  ['Zahra', 'Ismayilova'],
-  ['Tural', 'Guliyev'],
-  ['Fidan', 'Rahimli'],
-  ['Kamran', 'Abdullayev'],
-  ['Sabina', 'Rustamova'],
-  ['Emin', 'Jafarov'],
-  ['Lala', 'Asadova'],
-  ['Farid', 'Valiyev'],
-  ['Aysel', 'Nabiyeva'],
-  ['Samir', 'Hajiyev'],
-  ['Gunel', 'Bayramova'],
-  ['Elvin', 'Mustafayev'],
-  ['Narmin', 'Taghiyeva'],
-  ['Rashad', 'Suleymanov'],
+function pickBranches(domain: string, ownerIndex: number): BranchDef[] {
+  const count = deterministicNumber(`owner-${ownerIndex}:branch-count`, 3, 10);
+  const rotated = deterministicOrder(
+    bakuBranches(domain),
+    `owner-${ownerIndex}:branches`,
+    (branch) => branch.name,
+  );
+
+  return rotated.slice(0, count);
+}
+
+const FIRST_NAMES = [
+  'Aylin', 'Murad', 'Leyla', 'Orkhan', 'Nigar', 'Rauf', 'Zahra', 'Tural',
+  'Fidan', 'Kamran', 'Sabina', 'Emin', 'Lala', 'Farid', 'Aysel', 'Samir',
+  'Gunel', 'Elvin', 'Narmin', 'Rashad', 'Diana', 'Nicat', 'Sevda', 'Ilkin',
+  'Amina', 'Javid', 'Malak', 'Fuad', 'Rena', 'Teymur', 'Sona', 'Adil',
+  'Jala', 'Ruslan', 'Naila', 'Kanan', 'Milana', 'Anar', 'Sahar', 'Vusal',
+  'Sara', 'Nurlan', 'Inci', 'Arif', 'Mina', 'Omar', 'Roya', 'Eldar',
+  'Laman', 'Azad',
 ] as const;
+
+const LAST_NAMES = [
+  'Karimova', 'Aliyev', 'Mammadova', 'Hasanov', 'Huseynova', 'Mammadli',
+  'Ismayilova', 'Guliyev', 'Rahimli', 'Abdullayev', 'Rustamova', 'Jafarov',
+  'Asadova', 'Valiyev', 'Nabiyeva', 'Hajiyev', 'Bayramova', 'Mustafayev',
+  'Taghiyeva', 'Suleymanov', 'Qasimova', 'Novruzov', 'Safarova', 'Babayev',
+  'Aliyeva',
+] as const;
+
+const USER_PROFILES = Array.from({ length: 50 }, (_, index) => [
+  FIRST_NAMES[index % FIRST_NAMES.length],
+  LAST_NAMES[(index * 7) % LAST_NAMES.length],
+] as const);
 
 const BRAND_BLUEPRINTS = [
   { name: 'Luna Beauty Studio', categoryKeys: ['beauty_wellness', 'fashion_apparel'], query: 'beauty,salon,spa', domain: 'luna.az', focus: 'luxury beauty, hair design and skin rituals' },
@@ -312,16 +324,24 @@ function richDescription(title: string, ownerFocus: string, mode: 'brand' | 'dir
 function pickBrandServiceTemplates(categoryKeys: readonly string[], offset: number): Omit<ServiceDef, 'description'>[] {
   const primary = categoryKeys[0] ?? 'default';
   const templates = BRAND_SERVICE_TEMPLATES[primary] ?? BRAND_SERVICE_TEMPLATES.default;
-  return templates.map((template, index) => ({
-    ...template,
-    title: `${template.title}${offset > 0 ? ` ${offset + 1}` : ''}`,
-    price: template.price !== undefined ? template.price + ((offset + index) % 4) * 5 : undefined,
-    duration: template.duration + ((offset + index) % 3) * 5,
-  }));
+  const count = deterministicNumber(`owner-${offset}:brand-service-count`, 1, 20);
+  const pool = [...templates, ...BRAND_SERVICE_TEMPLATES.default];
+
+  return Array.from({ length: count }, (_, index) => {
+    const template = pool[(offset * 5 + index) % pool.length];
+    return {
+      ...template,
+      title: `${template.title}${index >= templates.length ? ` ${index + 1}` : offset > 0 ? ` ${offset + 1}` : ''}`,
+      price: template.price !== undefined ? template.price + ((offset + index) % 4) * 5 : undefined,
+      duration: template.duration + ((offset + index) % 3) * 5,
+    };
+  });
 }
 
-function pickDirectServices(ownerIndex: number, ownerFocus: string): ServiceDef[] {
-  const count = 2 + (ownerIndex % 4);
+function pickDirectServices(ownerIndex: number, ownerFocus: string, hasBrand: boolean): ServiceDef[] {
+  const count = hasBrand
+    ? deterministicNumber(`owner-${ownerIndex}:direct-count`, 0, 3)
+    : deterministicNumber(`owner-${ownerIndex}:direct-only-count`, 3, 12);
   return Array.from({ length: count }, (_, index) => {
     const template = DIRECT_SERVICE_POOL[(ownerIndex * 3 + index) % DIRECT_SERVICE_POOL.length];
     return {
@@ -336,20 +356,22 @@ function pickDirectServices(ownerIndex: number, ownerFocus: string): ServiceDef[
 function buildSeedUsers(): UserSeedDef[] {
   return USER_PROFILES.map(([firstName, lastName], index) => {
     const blueprint = BRAND_BLUEPRINTS[index % BRAND_BLUEPRINTS.length];
+    const hasBrand = index < 40;
     const brandName = index < BRAND_BLUEPRINTS.length
       ? blueprint.name
       : `${blueprint.name} ${index + 1}`;
     const branchDomain = blueprint.domain.replace('.az', `${index + 1}.az`);
-    const services = pickBrandServiceTemplates(blueprint.categoryKeys, Math.floor(index / BRAND_BLUEPRINTS.length)).map((service) => ({
+    const services = hasBrand ? pickBrandServiceTemplates(blueprint.categoryKeys, index).map((service) => ({
       ...service,
       description: richDescription(service.title, blueprint.focus, 'brand'),
-    }));
+    })) : [];
 
     return {
       email: `marketplace-uso-${index + 1}@reziphay.test`,
       first_name: firstName,
       last_name: lastName,
       phone: `+99450111${String(index + 1).padStart(4, '0')}`,
+      has_brand: hasBrand,
       brand_name: brandName,
       brand_description: [
         `<p>${brandName} is a marketplace-ready brand focused on ${blueprint.focus} across Baku.</p>`,
@@ -357,9 +379,9 @@ function buildSeedUsers(): UserSeedDef[] {
       ].join(''),
       brand_category_keys: [...blueprint.categoryKeys],
       image_query: blueprint.query,
-      branches: bakuBranches(branchDomain),
+      branches: hasBrand ? pickBranches(branchDomain, index) : [],
       services,
-      direct_services: pickDirectServices(index, blueprint.focus),
+      direct_services: pickDirectServices(index, blueprint.focus, hasBrand),
     };
   });
 }
@@ -467,90 +489,93 @@ async function seedUser(
   });
   const userId = user.id;
   const serviceIds: string[] = [];
-
-  // Brand logo (1:1)
-  const logoBuffer = await fetchThematicImage(512, 512, userDef.image_query, `${userDef.brand_name}-logo`);
-  const logoMediaId = await createMediaRecord(
-    userId,
-    logoBuffer,
-    `${userDef.brand_name} Logo`,
-    'other',
-    512,
-    512,
-  );
-
-  // Brand gallery (16:9)
-  const galleryBuffer = await fetchThematicImage(1280, 720, userDef.image_query, `${userDef.brand_name}-gallery`);
-  const galleryMediaId = await createMediaRecord(
-    userId,
-    galleryBuffer,
-    `${userDef.brand_name} Gallery`,
-    'other',
-    1280,
-    720,
-  );
-
-  const brandCatIds = userDef.brand_category_keys
-    .map((key) => categoryMaps.brand.get(key))
-    .filter((id): id is string => id !== undefined);
-
-  const brand = await prisma.brand.create({
-    data: {
-      name: userDef.brand_name,
-      description: userDef.brand_description,
-      owner_id: userId,
-      status: 'ACTIVE',
-      logo_media_id: logoMediaId,
-      categories: { connect: brandCatIds.map((id) => ({ id })) },
-      gallery: { create: [{ media_id: galleryMediaId, order: 0 }] },
-    },
-    select: { id: true },
-  });
-  const brandId = brand.id;
+  let brandId: string | undefined;
 
   // Branches
   const branchIds: string[] = [];
-  for (const branchDef of userDef.branches) {
-    const coverBuffer = await fetchThematicImage(1280, 720, userDef.image_query, `${userDef.brand_name}-${branchDef.name}`);
-    const coverMediaId = await createMediaRecord(
+  if (userDef.has_brand) {
+    // Brand logo (1:1)
+    const logoBuffer = await fetchThematicImage(512, 512, userDef.image_query, `${userDef.brand_name}-logo`);
+    const logoMediaId = await createMediaRecord(
       userId,
-      coverBuffer,
-      `${branchDef.name} Cover`,
-      'branch_cover',
+      logoBuffer,
+      `${userDef.brand_name} Logo`,
+      'other',
+      512,
+      512,
+    );
+
+    // Brand gallery (16:9)
+    const galleryBuffer = await fetchThematicImage(1280, 720, userDef.image_query, `${userDef.brand_name}-gallery`);
+    const galleryMediaId = await createMediaRecord(
+      userId,
+      galleryBuffer,
+      `${userDef.brand_name} Gallery`,
+      'other',
       1280,
       720,
     );
 
-    const branch = await prisma.branch.create({
+    const brandCatIds = userDef.brand_category_keys
+      .map((key) => categoryMaps.brand.get(key))
+      .filter((id): id is string => id !== undefined);
+
+    const brand = await prisma.brand.create({
       data: {
-        brand_id: brandId,
-        name: branchDef.name,
-        address1: branchDef.address1,
-        phone: branchDef.phone,
-        email: branchDef.email,
-        opening: '09:00',
-        closing: '21:00',
-        cover_media_id: coverMediaId,
+        name: userDef.brand_name,
+        description: userDef.brand_description,
+        owner_id: userId,
+        status: 'ACTIVE',
+        logo_media_id: logoMediaId,
+        categories: { connect: brandCatIds.map((id) => ({ id })) },
+        gallery: { create: [{ media_id: galleryMediaId, order: 0 }] },
       },
       select: { id: true },
     });
+    brandId = brand.id;
 
-    await prisma.team.create({
-      data: {
-        branch_id: branch.id,
-        created_by_user_id: userId,
-        members: {
-          create: {
-            user_id: userId,
-            invited_by_user_id: userId,
-            role: 'OWNER',
-            status: 'ACCEPTED',
+    for (const branchDef of userDef.branches) {
+      const coverBuffer = await fetchThematicImage(1280, 720, userDef.image_query, `${userDef.brand_name}-${branchDef.name}`);
+      const coverMediaId = await createMediaRecord(
+        userId,
+        coverBuffer,
+        `${branchDef.name} Cover`,
+        'branch_cover',
+        1280,
+        720,
+      );
+
+      const branch = await prisma.branch.create({
+        data: {
+          brand_id: brandId,
+          name: branchDef.name,
+          address1: branchDef.address1,
+          phone: branchDef.phone,
+          email: branchDef.email,
+          opening: '09:00',
+          closing: '21:00',
+          cover_media_id: coverMediaId,
+        },
+        select: { id: true },
+      });
+
+      await prisma.team.create({
+        data: {
+          branch_id: branch.id,
+          created_by_user_id: userId,
+          members: {
+            create: {
+              user_id: userId,
+              invited_by_user_id: userId,
+              role: 'OWNER',
+              status: 'ACCEPTED',
+            },
           },
         },
-      },
-    });
+      });
 
-    branchIds.push(branch.id);
+      branchIds.push(branch.id);
+    }
   }
 
   async function createSeedService(svcDef: ServiceDef, index: number, branchId: string | null) {
@@ -586,7 +611,7 @@ async function seedUser(
         price: svcDef.price ?? null,
         price_type: svcDef.price_type,
         duration: svcDef.duration,
-        address: branchId ? null : userDef.branches[index % userDef.branches.length]?.address1,
+        address: branchId ? null : (userDef.branches[index % userDef.branches.length]?.address1 ?? BAKU_BRANCHES[index % BAKU_BRANCHES.length].address1),
         status: 'ACTIVE',
         images: { create: [{ media_id: imgMediaId, order: 0 }] },
       },
@@ -608,7 +633,8 @@ async function seedUser(
   }
 
   console.log(
-    `  ✓ ${userDef.first_name} ${userDef.last_name} → ${userDef.brand_name}` +
+    `  ✓ ${userDef.first_name} ${userDef.last_name}` +
+      (userDef.has_brand ? ` → ${userDef.brand_name}` : ' → direct-only owner') +
       ` | ${userDef.branches.length} branches | ${userDef.services.length} brand services` +
       ` | ${userDef.direct_services.length} direct services`,
   );
@@ -617,7 +643,11 @@ async function seedUser(
 }
 
 async function seedBrandRatings(records: SeededMarketplaceOwner[]): Promise<number> {
-  const ratings = records.flatMap((record) => {
+  const brandRecords = records.filter(
+    (record): record is SeededMarketplaceOwner & { brandId: string } => Boolean(record.brandId),
+  );
+
+  const ratings = brandRecords.flatMap((record) => {
     const raters = deterministicOrder(
       records.filter((r) => r.userId !== record.userId),
       `${record.brandId}:raters`,
@@ -725,8 +755,8 @@ async function main(): Promise<void> {
 
   const totals = {
     users: SEED_USERS.length,
-    brands: SEED_USERS.length,
-    branches: SEED_USERS.length * 8,
+    brands: SEED_USERS.filter((u) => u.has_brand).length,
+    branches: SEED_USERS.reduce((sum, u) => sum + u.branches.length, 0),
     brandServices: SEED_USERS.reduce((sum, u) => sum + u.services.length, 0),
     directServices: SEED_USERS.reduce((sum, u) => sum + u.direct_services.length, 0),
     brandRatings: brandRatingCount,
