@@ -73,6 +73,27 @@ const serviceSelect = {
   branch_id: true,
   service_category_id: true,
   service_category: { select: { id: true, key: true } },
+  branch: {
+    select: {
+      id: true,
+      brand_id: true,
+      name: true,
+      brand: {
+        select: {
+          id: true,
+          name: true,
+          owner_id: true,
+          logo_media: { select: { id: true, storage_path: true } },
+          ratings: {
+            select: {
+              value: true,
+              user_id: true,
+            },
+          },
+        },
+      },
+    },
+  },
   price: true,
   price_type: true,
   duration: true,
@@ -112,6 +133,11 @@ function mapService(raw: any, requesterId?: string) {
     requesterId
       ? raw.ratings?.find((rating: { user_id: string }) => rating.user_id === requesterId)?.value ?? null
       : null;
+  const brandRatingCount = raw.branch?.brand?.ratings?.length ?? 0;
+  const brandRating =
+    brandRatingCount > 0
+      ? roundRating(raw.branch.brand.ratings.reduce((sum: number, rating: { value: number }) => sum + rating.value, 0) / brandRatingCount)
+      : null;
 
   return {
     id: raw.id,
@@ -119,6 +145,23 @@ function mapService(raw: any, requesterId?: string) {
     description: raw.description ?? undefined,
     owner_id: raw.owner_id,
     branch_id: raw.branch_id ?? null,
+    branch: raw.branch
+      ? {
+          id: raw.branch.id,
+          brand_id: raw.branch.brand_id,
+          name: raw.branch.name,
+          brand: raw.branch.brand
+            ? {
+                id: raw.branch.brand.id,
+                name: raw.branch.brand.name,
+                owner_id: raw.branch.brand.owner_id,
+                logo_url: raw.branch.brand.logo_media ? buildFileUrl(raw.branch.brand.logo_media.storage_path) : undefined,
+                rating: brandRating,
+                rating_count: brandRatingCount,
+              }
+            : null,
+        }
+      : null,
     service_category_id: raw.service_category_id ?? null,
     service_category: raw.service_category ?? null,
     price: raw.price ? Number(raw.price) : null,
@@ -290,16 +333,18 @@ export const listPublicServices = async (
   try {
     const service_category_id = typeof req.query['service_category_id'] === 'string' ? req.query['service_category_id'] : undefined;
     const branch_id = typeof req.query['branch_id'] === 'string' ? req.query['branch_id'] : undefined;
+    const brand_id = typeof req.query['brand_id'] === 'string' ? req.query['brand_id'] : undefined;
     const owner_id = typeof req.query['owner_id'] === 'string' ? req.query['owner_id'] : undefined;
     const direct_only = req.query['direct_only'] === 'true';
     const q = typeof req.query['q'] === 'string' ? req.query['q'] : undefined;
     const page = Math.max(1, Number.parseInt(String(req.query['page'] ?? '1'), 10) || 1);
-    const limit = Math.min(60, Math.max(1, Number.parseInt(String(req.query['limit'] ?? '60'), 10) || 60));
+    const limit = Math.min(200, Math.max(1, Number.parseInt(String(req.query['limit'] ?? '60'), 10) || 60));
     const skip = (page - 1) * limit;
     const where = {
       status: 'ACTIVE' as const,
       ...(service_category_id && { service_category_id }),
       ...(branch_id && { branch_id }),
+      ...(brand_id && !branch_id && !direct_only && { branch: { brand_id } }),
       ...(owner_id && { owner_id }),
       ...(direct_only && { branch_id: null }),
       ...(q && {
