@@ -42,8 +42,8 @@ app.use(
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Accept-Language'],
   }),
 );
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '256kb' }));
+app.use(express.urlencoded({ extended: true, limit: '256kb' }));
 
 // Serve uploaded files — path must never expose outside storage dir
 app.use('/uploads', express.static(path.resolve(env.STORAGE_DIR), { index: false, dotfiles: 'deny' }));

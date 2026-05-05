@@ -68,6 +68,354 @@ function ratingSummary(ratings: { value: number }[]) {
   };
 }
 
+function shuffle<T>(items: T[]): T[] {
+  return [...items].sort(() => Math.random() - 0.5);
+}
+
+const homeBrandSelect = {
+  id: true,
+  name: true,
+  description: true,
+  status: true,
+  owner_id: true,
+  created_at: true,
+  updated_at: true,
+  logo_media: { select: { storage_path: true } },
+  categories: { select: { id: true, key: true } },
+  gallery: {
+    select: {
+      id: true,
+      media_id: true,
+      order: true,
+      media: { select: { storage_path: true } },
+    },
+    orderBy: { order: 'asc' as const },
+  },
+  ratings: { select: { value: true, user_id: true } },
+} as const;
+
+const homeServiceSelect = {
+  id: true,
+  title: true,
+  description: true,
+  owner_id: true,
+  branch_id: true,
+  service_category_id: true,
+  service_category: { select: { id: true, key: true } },
+  price: true,
+  price_type: true,
+  duration: true,
+  address: true,
+  status: true,
+  rejection_reason: true,
+  created_at: true,
+  updated_at: true,
+  images: {
+    select: {
+      id: true,
+      media_id: true,
+      order: true,
+      media: { select: { storage_path: true } },
+    },
+    orderBy: { order: 'asc' as const },
+  },
+  ratings: { select: { value: true, user_id: true } },
+  branch: {
+    select: {
+      id: true,
+      brand_id: true,
+      name: true,
+      brand: {
+        select: {
+          id: true,
+          name: true,
+          owner_id: true,
+          logo_media: { select: { storage_path: true } },
+          ratings: { select: { value: true } },
+        },
+      },
+    },
+  },
+} as const;
+
+function mapHomeBrand(raw: any, requesterId?: string) {
+  const summary = ratingSummary(raw.ratings ?? []);
+  return {
+    id: raw.id,
+    name: raw.name,
+    description: raw.description ?? undefined,
+    status: raw.status,
+    owner_id: raw.owner_id,
+    logo_url: imageUrl(raw.logo_media?.storage_path) ?? undefined,
+    categories: raw.categories ?? [],
+    gallery: (raw.gallery ?? []).map((item: any) => ({
+      id: item.id,
+      media_id: item.media_id,
+      order: item.order,
+      url: buildFileUrl(item.media.storage_path),
+    })),
+    rating: summary.rating,
+    rating_count: summary.rating_count,
+    my_rating: requesterId
+      ? raw.ratings?.find((rating: { user_id: string }) => rating.user_id === requesterId)?.value ?? null
+      : null,
+    created_at: raw.created_at.toISOString(),
+    updated_at: raw.updated_at.toISOString(),
+  };
+}
+
+function mapHomeService(raw: any, requesterId?: string) {
+  const summary = ratingSummary(raw.ratings ?? []);
+  const brandSummary = ratingSummary(raw.branch?.brand?.ratings ?? []);
+  return {
+    id: raw.id,
+    title: raw.title,
+    description: raw.description ?? undefined,
+    owner_id: raw.owner_id,
+    branch_id: raw.branch_id ?? null,
+    branch: raw.branch
+      ? {
+          id: raw.branch.id,
+          brand_id: raw.branch.brand_id,
+          name: raw.branch.name,
+          brand: raw.branch.brand
+            ? {
+                id: raw.branch.brand.id,
+                name: raw.branch.brand.name,
+                owner_id: raw.branch.brand.owner_id,
+                logo_url: imageUrl(raw.branch.brand.logo_media?.storage_path) ?? undefined,
+                rating: brandSummary.rating,
+                rating_count: brandSummary.rating_count,
+              }
+            : null,
+        }
+      : null,
+    service_category_id: raw.service_category_id ?? null,
+    service_category: raw.service_category ?? null,
+    price: raw.price ? Number(raw.price) : null,
+    price_type: raw.price_type,
+    duration: raw.duration ?? null,
+    address: raw.address ?? undefined,
+    status: raw.status,
+    rejection_reason: raw.rejection_reason ?? undefined,
+    images: (raw.images ?? []).map((item: any) => ({
+      id: item.id,
+      media_id: item.media_id,
+      order: item.order,
+      url: buildFileUrl(item.media.storage_path),
+    })),
+    rating: summary.rating,
+    rating_count: summary.rating_count,
+    my_rating: requesterId
+      ? raw.ratings?.find((rating: { user_id: string }) => rating.user_id === requesterId)?.value ?? null
+      : null,
+    created_at: raw.created_at.toISOString(),
+    updated_at: raw.updated_at.toISOString(),
+  };
+}
+
+async function randomServiceIds(limit: number) {
+  return prisma.$queryRaw<{ id: string }[]>`
+    SELECT id FROM "Service"
+    WHERE status = 'ACTIVE'
+    ORDER BY RANDOM()
+    LIMIT ${limit}
+  `;
+}
+
+async function randomBrandIds(limit: number) {
+  return prisma.$queryRaw<{ id: string }[]>`
+    SELECT id FROM "Brand"
+    WHERE status = 'ACTIVE'
+    ORDER BY RANDOM()
+    LIMIT ${limit}
+  `;
+}
+
+async function servicesByIds(ids: string[]) {
+  if (ids.length === 0) return [];
+  const order = new Map(ids.map((id, index) => [id, index]));
+  const services = await prisma.service.findMany({
+    where: { id: { in: ids }, status: 'ACTIVE' },
+    select: homeServiceSelect,
+  });
+  return services.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+}
+
+async function brandsByIds(ids: string[]) {
+  if (ids.length === 0) return [];
+  const order = new Map(ids.map((id, index) => [id, index]));
+  const brands = await prisma.brand.findMany({
+    where: { id: { in: ids }, status: 'ACTIVE' },
+    select: homeBrandSelect,
+  });
+  return brands.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+}
+
+function topRated<T extends { ratings: { value: number }[]; created_at: Date }>(items: T[]) {
+  return [...items].sort((a, b) => {
+    const ar = ratingSummary(a.ratings);
+    const br = ratingSummary(b.ratings);
+    return (br.rating ?? 0) - (ar.rating ?? 0) || br.rating_count - ar.rating_count || b.created_at.getTime() - a.created_at.getTime();
+  });
+}
+
+export const getMarketplaceHome = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    const userId = req.user?.sub;
+
+    const [randomServiceRows, recentServices, recentBrands, topServicePool, topBrandPool, favoriteServices, favoriteBrands, usoPool] =
+      await Promise.all([
+        randomServiceIds(20),
+        prisma.service.findMany({
+          where: { status: 'ACTIVE' },
+          select: homeServiceSelect,
+          orderBy: { created_at: 'desc' },
+          take: 10,
+        }),
+        prisma.brand.findMany({
+          where: { status: 'ACTIVE' },
+          select: homeBrandSelect,
+          orderBy: { created_at: 'desc' },
+          take: 10,
+        }),
+        prisma.service.findMany({
+          where: { status: 'ACTIVE', ratings: { some: {} } },
+          select: homeServiceSelect,
+          orderBy: { created_at: 'desc' },
+          take: 220,
+        }),
+        prisma.brand.findMany({
+          where: { status: 'ACTIVE', ratings: { some: {} } },
+          select: homeBrandSelect,
+          orderBy: { created_at: 'desc' },
+          take: 160,
+        }),
+        userId
+          ? prisma.favoriteService.findMany({
+              where: { user_id: userId, service: { status: 'ACTIVE' } },
+              select: {
+                service_id: true,
+                service: {
+                  select: {
+                    service_category_id: true,
+                    branch: { select: { brand: { select: { categories: { select: { id: true } } } } } },
+                  },
+                },
+              },
+              orderBy: { created_at: 'desc' },
+              take: 20,
+            })
+          : Promise.resolve([]),
+        userId
+          ? prisma.favoriteBrand.findMany({
+              where: { user_id: userId, brand: { status: 'ACTIVE' } },
+              select: { brand_id: true, brand: { select: { categories: { select: { id: true } } } } },
+              orderBy: { created_at: 'desc' },
+              take: 20,
+            })
+          : Promise.resolve([]),
+        prisma.user.findMany({
+          where: {
+            type: 'uso',
+            OR: [{ brands: { some: { status: 'ACTIVE' } } }, { services: { some: { status: 'ACTIVE' } } }],
+          },
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+            avatar_media: { select: { storage_path: true } },
+            brands: { where: { status: 'ACTIVE' }, select: { ratings: { select: { value: true } } } },
+            services: { where: { status: 'ACTIVE' }, select: { ratings: { select: { value: true } } } },
+          },
+          take: 160,
+        }),
+      ]);
+
+    const randomServices = await servicesByIds(randomServiceRows.map((row) => row.id));
+    const serviceCategoryIds = [
+      ...new Set(favoriteServices.map((favorite: any) => favorite.service.service_category_id).filter(Boolean)),
+    ];
+    const brandCategoryIds = [
+      ...new Set([
+        ...favoriteBrands.flatMap((favorite: any) => favorite.brand.categories.map((category: { id: string }) => category.id)),
+        ...favoriteServices.flatMap((favorite: any) =>
+          favorite.service.branch?.brand?.categories.map((category: { id: string }) => category.id) ?? [],
+        ),
+      ]),
+    ];
+
+    const [recommendedServicePool, recommendedBrandPool] = await Promise.all([
+      serviceCategoryIds.length > 0
+        ? prisma.service.findMany({
+            where: {
+              status: 'ACTIVE',
+              service_category_id: { in: serviceCategoryIds },
+              id: { notIn: favoriteServices.map((favorite: any) => favorite.service_id) },
+            },
+            select: homeServiceSelect,
+            take: 80,
+          })
+        : servicesByIds((await randomServiceIds(20)).map((row) => row.id)),
+      brandCategoryIds.length > 0
+        ? prisma.brand.findMany({
+            where: {
+              status: 'ACTIVE',
+              categories: { some: { id: { in: brandCategoryIds } } },
+              id: { notIn: favoriteBrands.map((favorite: any) => favorite.brand_id) },
+            },
+            select: homeBrandSelect,
+            take: 60,
+          })
+        : brandsByIds((await randomBrandIds(20)).map((row) => row.id)),
+    ]);
+
+    const topUsos = usoPool
+      .map((user) => {
+        const ratings = [
+          ...user.brands.flatMap((brand) => brand.ratings),
+          ...user.services.flatMap((service) => service.ratings),
+        ];
+        return {
+          id: user.id,
+          first_name: user.first_name,
+          last_name: user.last_name,
+          email: user.email,
+          type: 'uso',
+          avatar_url: imageUrl(user.avatar_media?.storage_path),
+          ...ratingSummary(ratings),
+        };
+      })
+      .filter((user) => user.rating !== null)
+      .sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0) || b.rating_count - a.rating_count)
+      .slice(0, 10);
+
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'marketplace.home',
+      data: {
+        random_services: randomServices.slice(0, 10).map((service) => mapHomeService(service, userId)),
+        smart_services: randomServices.slice(10, 20).map((service) => mapHomeService(service, userId)),
+        recent_services: recentServices.map((service) => mapHomeService(service, userId)),
+        recent_brands: recentBrands.map((brand) => mapHomeBrand(brand, userId)),
+        recommended_services: shuffle(recommendedServicePool).slice(0, 10).map((service) => mapHomeService(service, userId)),
+        recommended_brands: shuffle(recommendedBrandPool).slice(0, 10).map((brand) => mapHomeBrand(brand, userId)),
+        top_rated_services: topRated(topServicePool).slice(0, 10).map((service) => mapHomeService(service, userId)),
+        top_rated_brands: topRated(topBrandPool).slice(0, 10).map((brand) => mapHomeBrand(brand, userId)),
+        top_usos: topUsos,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 function parseSearchLimit(value: unknown, fallback = 8) {
   return Math.min(40, Math.max(1, Number.parseInt(String(value ?? fallback), 10) || fallback));
 }
