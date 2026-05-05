@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { register, login, refresh, me } from '../../controllers/auth.controller';
 import { validate } from '../../middlewares/validate.middleware';
 import { authenticate } from '../../middlewares/auth.middleware';
+import { authRateLimiter } from '../../middlewares/rate-limit.middleware';
 import { registerSchema, loginSchema, refreshSchema } from '../../schemas/auth.schema';
 
 const router: Router = Router();
@@ -60,7 +61,7 @@ const router: Router = Router();
  *       409:
  *         description: Email already in use
  */
-router.post('/register', validate(registerSchema), register);
+router.post('/register', authRateLimiter, validate(registerSchema), register);
 
 /**
  * @openapi
@@ -94,7 +95,7 @@ router.post('/register', validate(registerSchema), register);
  *       401:
  *         description: Invalid email or password
  */
-router.post('/login', validate(loginSchema), login);
+router.post('/login', authRateLimiter, validate(loginSchema), login);
 
 router.post('/refresh', validate(refreshSchema), refresh);
 

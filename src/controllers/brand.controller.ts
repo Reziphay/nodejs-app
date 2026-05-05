@@ -131,11 +131,19 @@ const brandSelect = {
   name: true,
   description: true,
   status: true,
+  rejection_reason: true,
   owner_id: true,
   logo_media_id: true,
+  instagram_url: true,
+  facebook_url: true,
+  youtube_url: true,
+  whatsapp_url: true,
+  linkedin_url: true,
+  x_url: true,
+  website_url: true,
   created_at: true,
   updated_at: true,
-  categories: { select: { id: true, name: true } },
+  categories: { select: { id: true, key: true } },
   logo_media: { select: { id: true, storage_path: true } },
   gallery: {
     select: {
@@ -155,7 +163,7 @@ const brandSelect = {
 } as const;
 
 type BrandRaw = Awaited<ReturnType<typeof prisma.brand.findUniqueOrThrow>> & {
-  categories: { id: string; name: string }[];
+  categories: { id: string; key: string }[];
   logo_media: { id: string; storage_path: string } | null;
   gallery: { id: string; media_id: string; order: number; media: { id: string; storage_path: string } }[];
   ratings: { value: number; user_id: string }[];
@@ -177,6 +185,7 @@ function mapBrand(raw: BrandRaw, requesterId?: string) {
     name: raw.name,
     description: raw.description ?? undefined,
     status: raw.status,
+    rejection_reason: raw.rejection_reason ?? undefined,
     owner_id: raw.owner_id,
     logo_url: raw.logo_media ? buildFileUrl(raw.logo_media.storage_path) : undefined,
     categories: raw.categories,
@@ -186,6 +195,13 @@ function mapBrand(raw: BrandRaw, requesterId?: string) {
       order: g.order,
       url: buildFileUrl(g.media.storage_path),
     })),
+    instagram_url: raw.instagram_url ?? undefined,
+    facebook_url: raw.facebook_url ?? undefined,
+    youtube_url: raw.youtube_url ?? undefined,
+    whatsapp_url: raw.whatsapp_url ?? undefined,
+    linkedin_url: raw.linkedin_url ?? undefined,
+    x_url: raw.x_url ?? undefined,
+    website_url: raw.website_url ?? undefined,
     rating: ratingAverage,
     rating_count: ratingCount,
     my_rating: myRating,
@@ -349,6 +365,13 @@ export const createBrand = async (
           description: body.description,
           owner_id: userId,
           logo_media_id: body.logo_media_id ?? null,
+          instagram_url: body.instagram_url ?? null,
+          facebook_url: body.facebook_url ?? null,
+          youtube_url: body.youtube_url ?? null,
+          whatsapp_url: body.whatsapp_url ?? null,
+          linkedin_url: body.linkedin_url ?? null,
+          x_url: body.x_url ?? null,
+          website_url: body.website_url ?? null,
           categories:
             body.categoryIds && body.categoryIds.length > 0
               ? { connect: body.categoryIds.map((id) => ({ id })) }
@@ -463,10 +486,11 @@ export const getBrandById = async (
       return next(err);
     }
 
-    // Non-ACTIVE brands are only visible to their owner
+    // Non-ACTIVE brands are visible to their owner and admins.
     if (brand.status !== 'ACTIVE') {
       const userId = req.user?.sub;
-      if (!userId || brand.owner_id !== userId) {
+      const isAdmin = req.user?.type === 'admin';
+      if (!isAdmin && (!userId || brand.owner_id !== userId)) {
         const err: AppError = new Error();
         err.statusCode = 404;
         err.messageKey = 'brand.not_found';
@@ -501,7 +525,7 @@ export const updateBrand = async (
     const id = req.params['id'] as string;
     const userId = req.user.sub;
 
-    const existing = await prisma.brand.findUnique({ where: { id }, select: { owner_id: true } });
+    const existing = await prisma.brand.findUnique({ where: { id }, select: { owner_id: true, status: true } });
     if (!existing) {
       const err: AppError = new Error();
       err.statusCode = 404;
@@ -509,6 +533,10 @@ export const updateBrand = async (
       return next(err);
     }
     if (!requireOwner(existing.owner_id, userId, next)) return;
+
+    // Editing an ACTIVE or REJECTED brand resets it to PENDING for re-review.
+    // PENDING stays PENDING; CLOSED is immutable.
+    const shouldResetToPending = existing.status === 'ACTIVE' || existing.status === 'REJECTED';
 
     const body = req.body as UpdateBrandInput;
 
@@ -539,10 +567,18 @@ export const updateBrand = async (
     const brand = await prisma.brand.update({
       where: { id },
       data: {
+        ...(shouldResetToPending && { status: 'PENDING' }),
         ...(body.name !== undefined && { name: body.name }),
         ...(body.description !== undefined && { description: body.description }),
         // logo_media_id can be set to null (removal) or a new id; skip if not in payload
         ...(body.logo_media_id !== undefined && { logo_media_id: body.logo_media_id }),
+        ...(body.instagram_url !== undefined && { instagram_url: body.instagram_url }),
+        ...(body.facebook_url !== undefined && { facebook_url: body.facebook_url }),
+        ...(body.youtube_url !== undefined && { youtube_url: body.youtube_url }),
+        ...(body.whatsapp_url !== undefined && { whatsapp_url: body.whatsapp_url }),
+        ...(body.linkedin_url !== undefined && { linkedin_url: body.linkedin_url }),
+        ...(body.x_url !== undefined && { x_url: body.x_url }),
+        ...(body.website_url !== undefined && { website_url: body.website_url }),
         ...(body.categoryIds !== undefined && {
           categories: {
             set: body.categoryIds.map((cid) => ({ id: cid })),
@@ -613,10 +649,15 @@ export const listPublicBrands = async (
 ): Promise<void> => {
   try {
     const accountId = typeof req.query['account'] === 'string' ? req.query['account'] : undefined;
+    const brandCategoryId = typeof req.query['brand_category_id'] === 'string' ? req.query['brand_category_id'] : undefined;
+    const page = Math.max(1, Number.parseInt(String(req.query['page'] ?? '1'), 10) || 1);
+    const limit = Math.min(60, Math.max(1, Number.parseInt(String(req.query['limit'] ?? '60'), 10) || 60));
+    const skip = (page - 1) * limit;
 
     if (accountId) {
       // Public account view: ACTIVE first (newest-first), then CLOSED (newest-first).
       // PENDING, REJECTED and any other non-public statuses are intentionally excluded.
+      // brand_category_id filter is not applied in account view.
       const [activeBrands, closedBrands] = await Promise.all([
         prisma.brand.findMany({
           where: { owner_id: accountId, status: 'ACTIVE' },
@@ -635,14 +676,36 @@ export const listPublicBrands = async (
       return;
     }
 
-    // Default public gallery: active brands only.
-    const brands = await prisma.brand.findMany({
-      where: { status: 'ACTIVE' },
-      select: brandSelect,
-      orderBy: { created_at: 'desc' },
-    });
+    // Default public gallery: active brands only, optionally filtered by category.
+    const where = {
+      status: 'ACTIVE' as const,
+      ...(brandCategoryId && { categories: { some: { id: brandCategoryId } } }),
+    };
+    const [brands, totalCount] = await Promise.all([
+      prisma.brand.findMany({
+        where,
+        select: brandSelect,
+        orderBy: { created_at: 'desc' },
+        skip,
+        take: limit,
+      }),
+      prisma.brand.count({ where }),
+    ]);
 
-    sendSuccess({ res, status: 200, message: 'brand.list', data: { brands: brands.map((b) => mapBrand(b as BrandRaw)) } });
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'brand.list',
+      data: {
+        brands: brands.map((b) => mapBrand(b as BrandRaw)),
+        meta: {
+          page,
+          limit,
+          total_count: totalCount,
+          has_more: skip + brands.length < totalCount,
+        },
+      },
+    });
   } catch (err) {
     next(err);
   }
@@ -1283,7 +1346,7 @@ export const listCategories = async (
 ): Promise<void> => {
   try {
     const categories = await prisma.brandCategory.findMany({
-      orderBy: { name: 'asc' },
+      orderBy: { key: 'asc' },
     });
 
     sendSuccess({ res, status: 200, message: 'brand.categories_list', data: { categories } });

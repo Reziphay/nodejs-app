@@ -1,4 +1,8 @@
 import { z } from 'zod';
+import { sanitizeRichHtml } from '../lib/rich-text';
+
+const richDescription = (max: number) =>
+  z.string().max(max).trim().transform((v) => sanitizeRichHtml(v));
 
 // ─── Branch ───────────────────────────────────────────────────────────────────
 
@@ -12,7 +16,7 @@ const branchBreakSchema = z.object({
 export const createBranchSchema = z
   .object({
     name: z.string().min(2, 'Branch name must be at least 2 characters').max(100).trim(),
-    description: z.string().max(1000).trim().optional(),
+    description: richDescription(1000).optional(),
     address1: z.string().min(2).max(200).trim(),
     address2: z.string().max(200).trim().optional(),
     phone: z.string().regex(/^\+?\d{7,20}$/, 'Invalid phone number').optional(),
@@ -33,7 +37,7 @@ export type CreateBranchInput = z.infer<typeof createBranchSchema>;
 export const updateBranchSchema = z
   .object({
     name: z.string().min(2).max(100).trim().optional(),
-    description: z.string().max(1000).trim().nullable().optional(),
+    description: richDescription(1000).nullable().optional(),
     address1: z.string().min(2).max(200).trim().optional(),
     address2: z.string().max(200).trim().nullable().optional(),
     phone: z.string().regex(/^\+?\d{7,20}$/, 'Invalid phone number').nullable().optional(),
@@ -59,23 +63,46 @@ export type UpdateBranchInput = z.infer<typeof updateBranchSchema>;
 
 // ─── Brand ────────────────────────────────────────────────────────────────────
 
+const socialUrlSchema = z
+  .string()
+  .url('Invalid URL')
+  .max(500)
+  .refine(
+    (url) => url.startsWith('https://') || url.startsWith('http://'),
+    'URL must use https:// or http://',
+  )
+  .nullable()
+  .optional();
+
+const socialLinksShape = {
+  instagram_url: socialUrlSchema,
+  facebook_url:  socialUrlSchema,
+  youtube_url:   socialUrlSchema,
+  whatsapp_url:  socialUrlSchema,
+  linkedin_url:  socialUrlSchema,
+  x_url:         socialUrlSchema,
+  website_url:   socialUrlSchema,
+};
+
 export const createBrandSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters').max(100).trim(),
-  description: z.string().max(1000).trim().optional(),
+  description: richDescription(1000).optional(),
   categoryIds: z.array(z.string().cuid('Invalid category id')).optional().default([]),
   logo_media_id: z.string().cuid('Invalid media id').optional(),
   gallery_media_ids: z.array(z.string().cuid('Invalid media id')).optional().default([]),
   branches: z.array(createBranchSchema).optional().default([]),
+  ...socialLinksShape,
 });
 
 export type CreateBrandInput = z.infer<typeof createBrandSchema>;
 
 export const updateBrandSchema = z.object({
   name: z.string().min(2).max(100).trim().optional(),
-  description: z.string().max(1000).trim().nullable().optional(),
+  description: richDescription(1000).nullable().optional(),
   categoryIds: z.array(z.string().cuid('Invalid category id')).optional(),
   logo_media_id: z.string().cuid('Invalid media id').nullable().optional(),
   gallery_media_ids: z.array(z.string().cuid('Invalid media id')).optional(),
+  ...socialLinksShape,
 });
 
 export type UpdateBrandInput = z.infer<typeof updateBrandSchema>;

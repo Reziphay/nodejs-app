@@ -20,7 +20,9 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:prod": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
-    "prisma:reset": "prisma migrate reset"
+    "prisma:reset": "prisma migrate reset",
+    "seed:marketplace": "ts-node src/lib/seed-marketplace.ts",
+    "seed:marketplace:docker": "pnpm prisma migrate deploy && docker compose build app && docker compose up -d app && docker compose exec app node dist/lib/seed-marketplace.js"
   },
   "devDependencies": {
     "@types/bcryptjs": "^3.0.0",
@@ -40,15 +42,18 @@
   "dependencies": {
     "@prisma/adapter-pg": "^7.6.0",
     "@prisma/client": "^7.6.0",
+    "@types/sanitize-html": "^2.16.1",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.5.0",
     "file-type": "^22.0.0",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.1.1",
     "pg": "^8.20.0",
+    "sanitize-html": "^2.17.3",
     "sharp": "^0.34.5",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",

@@ -6,6 +6,10 @@ import mediaRoute from './media.route';
 import brandRoute from './brand.route';
 import notificationRoute from './notification.route';
 import teamRoute from './team.route';
+import serviceRoute from './service.route';
+import moderationRoute from './moderation.route';
+import marketplaceRoute from './marketplace.route';
+import favoriteRoute from './favorite.route';
 
 const router: Router = Router();
 
@@ -16,5 +20,9 @@ router.use('/users', mediaRoute);
 router.use('/', brandRoute);
 router.use('/notifications', notificationRoute);
 router.use('/', teamRoute);
+router.use('/', serviceRoute);
+router.use('/', moderationRoute);
+router.use('/', marketplaceRoute);
+router.use('/', favoriteRoute);
 
 export default router;

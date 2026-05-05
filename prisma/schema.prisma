@@ -32,6 +32,34 @@ enum MediaKind {
   document
   branch_cover
   other
+  service_image
+}
+
+enum ServiceStatus {
+  DRAFT
+  PENDING
+  ACTIVE
+  REJECTED
+  PAUSED
+  ARCHIVED
+}
+
+enum PriceType {
+  FIXED
+  STARTING_FROM
+  FREE
+}
+
+// ─── Moderation enums ─────────────────────────────────────────────────────────
+
+enum ModerationEntityType {
+  brand
+  service
+}
+
+enum ModerationOutcome {
+  APPROVED
+  REJECTED
 }
 
 model User {
@@ -50,6 +78,13 @@ model User {
   phone_verified   Boolean   @default(false)
   email_verified   Boolean   @default(false)
   avatar_media_id  String?
+  instagram_url    String?
+  facebook_url     String?
+  youtube_url      String?
+  whatsapp_url     String?
+  linkedin_url     String?
+  x_url            String?
+  website_url      String?
 
   created_at  DateTime @default(now())
   updated_at  DateTime @updatedAt
@@ -57,15 +92,20 @@ model User {
   refresh_tokens       RefreshToken[]
   media                Media[]
   brands               Brand[]
+  services             Service[]
   brand_transfers      BrandTransfer[] @relation("BrandTransferRequester")
   received_transfers   BrandTransfer[] @relation("BrandTransferRecipient")
   brand_ratings        BrandRating[]
+  service_ratings      ServiceRating[]
+  favorite_brands      FavoriteBrand[]
+  favorite_services    FavoriteService[]
   notifications        Notification[]
   teams_created             Team[]                       @relation("TeamCreator")
   team_memberships          TeamMember[]                 @relation("TeamMemberUser")
   invitations_sent          TeamMember[]                 @relation("TeamMemberInviter")
   feed_dismissals           NotificationFeedDismissal[]
   feed_state                NotificationFeedState?
+  moderation_reviews        ModerationReview[]           @relation("ModerationReviewer")
 
   avatar_media Media? @relation("UserAvatar", fields: [avatar_media_id], references: [id], onDelete: SetNull)
 
@@ -95,6 +135,7 @@ model Media {
   brand_logo    Brand[]        @relation("BrandLogo")
   brand_gallery BrandGallery[] @relation("BrandGallery")
   branch_covers Branch[]       @relation("BranchCover")
+  service_images ServiceMedia[]
 
   @@index([owner_id])
 }
@@ -117,17 +158,31 @@ enum BrandTransferStatus {
 
 model BrandCategory {
   id     String  @id @default(cuid())
-  name   String  @unique
+  key    String  @unique
   brands Brand[]
+}
+
+model ServiceCategory {
+  id       String    @id @default(cuid())
+  key      String    @unique
+  services Service[]
 }
 
 model Brand {
   id            String      @id @default(cuid())
   name          String
   description   String?
-  status        BrandStatus @default(PENDING)
+  status           BrandStatus @default(PENDING)
+  rejection_reason String?
   owner_id      String
   logo_media_id String?
+  instagram_url String?
+  facebook_url  String?
+  youtube_url   String?
+  whatsapp_url  String?
+  linkedin_url  String?
+  x_url         String?
+  website_url   String?
   created_at    DateTime    @default(now())
   updated_at    DateTime    @updatedAt
 
@@ -137,6 +192,7 @@ model Brand {
   branches   Branch[]
   categories BrandCategory[]
   ratings    BrandRating[]
+  favorites  FavoriteBrand[]
   transfers  BrandTransfer[]
 
   @@index([owner_id])
@@ -175,6 +231,7 @@ model Branch {
   breaks      BranchBreak[]
   team        Team?         @relation("BranchTeam")
   cover_media Media?        @relation("BranchCover", fields: [cover_media_id], references: [id], onDelete: SetNull)
+  services    Service[]
 
   @@index([brand_id])
 }
@@ -326,4 +383,109 @@ model TeamMember {
   @@unique([team_id, user_id])
   @@index([team_id])
   @@index([user_id])
+}
+
+// ─── Service models ───────────────────────────────────────────────────────────
+
+model Service {
+  id                   String        @id @default(cuid())
+  title                String
+  description          String?
+  owner_id             String
+  branch_id            String?
+  service_category_id  String?
+  price                Decimal?      @db.Decimal(10, 2)
+  price_type           PriceType     @default(FIXED)
+  duration             Int?
+  address              String?
+  status               ServiceStatus @default(DRAFT)
+  rejection_reason     String?
+  created_at           DateTime      @default(now())
+  updated_at           DateTime      @updatedAt
+
+  owner            User             @relation(fields: [owner_id], references: [id], onDelete: Cascade)
+  branch           Branch?          @relation(fields: [branch_id], references: [id], onDelete: SetNull)
+  service_category ServiceCategory? @relation(fields: [service_category_id], references: [id], onDelete: SetNull)
+  images           ServiceMedia[]
+  ratings          ServiceRating[]
+  favorites        FavoriteService[]
+
+  @@index([owner_id])
+  @@index([branch_id])
+  @@index([status])
+  @@index([service_category_id])
+}
+
+model ServiceRating {
+  id         String   @id @default(cuid())
+  service_id String
+  user_id    String
+  value      Int
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  service Service @relation(fields: [service_id], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([service_id, user_id])
+  @@index([service_id])
+  @@index([user_id])
+}
+
+model FavoriteBrand {
+  id         String   @id @default(cuid())
+  user_id    String
+  brand_id   String
+  created_at DateTime @default(now())
+
+  user  User  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  brand Brand @relation(fields: [brand_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, brand_id])
+  @@index([user_id, created_at])
+  @@index([brand_id])
+}
+
+model FavoriteService {
+  id         String   @id @default(cuid())
+  user_id    String
+  service_id String
+  created_at DateTime @default(now())
+
+  user    User    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  service Service @relation(fields: [service_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, service_id])
+  @@index([user_id, created_at])
+  @@index([service_id])
+}
+
+model ServiceMedia {
+  id         String @id @default(cuid())
+  service_id String
+  media_id   String
+  order      Int    @default(0)
+
+  service Service @relation(fields: [service_id], references: [id], onDelete: Cascade)
+  media   Media   @relation(fields: [media_id], references: [id], onDelete: Cascade)
+
+  @@index([service_id])
+}
+
+// ─── Moderation Review ───────────────────────────────────────────────────────
+
+model ModerationReview {
+  id               String               @id @default(cuid())
+  entity_type      ModerationEntityType
+  entity_id        String
+  reviewer_id      String
+  outcome          ModerationOutcome
+  rejection_reason String?
+  checklist        Json?                // Array of {key: string, label: string, passed: boolean}
+  created_at       DateTime             @default(now())
+
+  reviewer User @relation("ModerationReviewer", fields: [reviewer_id], references: [id], onDelete: Cascade)
+
+  @@index([entity_type, entity_id])
+  @@index([reviewer_id])
 }
