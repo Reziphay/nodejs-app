@@ -172,7 +172,8 @@ model Brand {
   id            String      @id @default(cuid())
   name          String
   description   String?
-  status        BrandStatus @default(PENDING)
+  status           BrandStatus @default(PENDING)
+  rejection_reason String?
   owner_id      String
   logo_media_id String?
   instagram_url String?

@@ -5,7 +5,7 @@ import { AppError } from '../middlewares/error.middleware';
 import { buildFileUrl } from '../services/storage.service';
 import { validateAndProcessImage, writeFileToDisk } from '../services/media.service';
 import { buildStoragePath, ensureUserStorageDir } from '../services/storage.service';
-import type { CreateServiceInput, UpdateServiceInput, UpsertServiceRatingInput } from '../schemas/service.schema';
+import type { CreateServiceInput, UpdateServiceInput } from '../schemas/service.schema';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -83,6 +83,7 @@ const serviceSelect = {
           id: true,
           name: true,
           owner_id: true,
+          status: true,
           logo_media: { select: { id: true, storage_path: true } },
           ratings: {
             select: {
@@ -133,6 +134,12 @@ function mapService(raw: any, requesterId?: string) {
     requesterId
       ? raw.ratings?.find((rating: { user_id: string }) => rating.user_id === requesterId)?.value ?? null
       : null;
+  // Public rating aggregates are suppressed until reservation-based eligibility
+  // gating is implemented. Only the service owner sees the raw aggregate so they
+  // can monitor incoming feedback. Other viewers see null/0.
+  const isOwner = !!requesterId && raw.owner_id === requesterId;
+  const publicRating = isOwner ? ratingAverage : null;
+  const publicRatingCount = isOwner ? ratingCount : 0;
   const brandRatingCount = raw.branch?.brand?.ratings?.length ?? 0;
   const brandRating =
     brandRatingCount > 0
@@ -176,8 +183,8 @@ function mapService(raw: any, requesterId?: string) {
       order: img.order,
       url: buildFileUrl(img.media.storage_path),
     })),
-    rating: ratingAverage,
-    rating_count: ratingCount,
+    rating: publicRating,
+    rating_count: publicRatingCount,
     my_rating: myRating,
     created_at: raw.created_at.toISOString(),
     updated_at: raw.updated_at.toISOString(),
@@ -185,6 +192,39 @@ function mapService(raw: any, requesterId?: string) {
 }
 
 const SIGNIFICANT_FIELDS = ['title', 'description', 'price', 'price_type', 'duration', 'address', 'branch_id', 'service_category_id'] as const;
+
+// Verify user can attach a service to the given branch:
+// either as brand owner or as ACCEPTED team member of the branch's team.
+async function validateBranchAccess(
+  branchId: string,
+  userId: string,
+  next: NextFunction,
+): Promise<boolean> {
+  const branch = await prisma.branch.findUnique({
+    where: { id: branchId },
+    select: { brand: { select: { owner_id: true } } },
+  });
+  if (!branch) {
+    const err: AppError = new Error();
+    err.statusCode = 404;
+    err.messageKey = 'service.branch_not_found';
+    next(err);
+    return false;
+  }
+  if (branch.brand.owner_id === userId) return true;
+
+  const membership = await prisma.teamMember.findFirst({
+    where: { team: { branch_id: branchId }, user_id: userId, status: 'ACCEPTED' },
+  });
+  if (!membership) {
+    const err: AppError = new Error();
+    err.statusCode = 403;
+    err.messageKey = 'service.not_branch_member';
+    next(err);
+    return false;
+  }
+  return true;
+}
 
 // ─── Media upload ─────────────────────────────────────────────────────────────
 
@@ -251,17 +291,9 @@ export const createService = async (
     const userId = req.user.sub;
     const body = req.body as CreateServiceInput;
 
-    // Validate branch membership if branch_id provided
+    // Validate branch access if branch_id provided
     if (body.branch_id) {
-      const membership = await prisma.teamMember.findFirst({
-        where: { team: { branch_id: body.branch_id }, user_id: userId, status: 'ACCEPTED' },
-      });
-      if (!membership) {
-        const err: AppError = new Error();
-        err.statusCode = 403;
-        err.messageKey = 'service.not_branch_member';
-        return next(err);
-      }
+      if (!(await validateBranchAccess(body.branch_id, userId, next))) return;
     }
 
     // Validate image media ownership
@@ -347,6 +379,16 @@ export const listPublicServices = async (
       ...(brand_id && !branch_id && !direct_only && { branch: { brand_id } }),
       ...(owner_id && { owner_id }),
       ...(direct_only && { branch_id: null }),
+      // Branch-linked services are only public if their parent brand is ACTIVE.
+      // Direct services (branch_id IS NULL) are unaffected.
+      AND: [
+        {
+          OR: [
+            { branch_id: null },
+            { branch: { brand: { status: 'ACTIVE' as const } } },
+          ],
+        },
+      ],
       ...(q && {
         OR: [
           { title: { contains: q, mode: 'insensitive' as const } },
@@ -404,15 +446,23 @@ export const getServiceById = async (
       return next(err);
     }
 
+    const userId = req.user?.sub;
+    const isOwner = !!userId && service.owner_id === userId;
+
     // Non-ACTIVE services are only visible to their owner
-    if (service.status !== 'ACTIVE') {
-      const userId = req.user?.sub;
-      if (!userId || service.owner_id !== userId) {
-        const err: AppError = new Error();
-        err.statusCode = 404;
-        err.messageKey = 'service.not_found';
-        return next(err);
-      }
+    if (service.status !== 'ACTIVE' && !isOwner) {
+      const err: AppError = new Error();
+      err.statusCode = 404;
+      err.messageKey = 'service.not_found';
+      return next(err);
+    }
+
+    // Branch-linked services with a non-ACTIVE parent brand are hidden from non-owners.
+    if (service.branch && service.branch.brand.status !== 'ACTIVE' && !isOwner) {
+      const err: AppError = new Error();
+      err.statusCode = 404;
+      err.messageKey = 'service.not_found';
+      return next(err);
     }
 
     sendSuccess({ res, status: 200, message: 'service.found', data: { service: mapService(service, req.user?.sub) } });
@@ -425,61 +475,16 @@ export const getServiceById = async (
 
 export const upsertServiceRating = async (
   req: Request,
-  res: Response,
+  _res: Response,
   next: NextFunction,
 ): Promise<void> => {
   try {
     if (!requireUcr(req, next)) return;
 
-    const id = req.params['id'] as string;
-    const userId = req.user.sub;
-    const body = req.body as UpsertServiceRatingInput;
-
-    const service = await prisma.service.findUnique({
-      where: { id },
-      select: { id: true, status: true },
-    });
-
-    if (!service || service.status !== 'ACTIVE') {
-      const err: AppError = new Error();
-      err.statusCode = 404;
-      err.messageKey = 'service.not_found';
-      return next(err);
-    }
-
-    await prisma.serviceRating.upsert({
-      where: {
-        service_id_user_id: {
-          service_id: id,
-          user_id: userId,
-        },
-      },
-      update: { value: body.value },
-      create: {
-        service_id: id,
-        user_id: userId,
-        value: body.value,
-      },
-    });
-
-    const updatedService = await prisma.service.findUnique({
-      where: { id },
-      select: serviceSelect,
-    });
-
-    if (!updatedService) {
-      const err: AppError = new Error();
-      err.statusCode = 404;
-      err.messageKey = 'service.not_found';
-      return next(err);
-    }
-
-    sendSuccess({
-      res,
-      status: 200,
-      message: 'service.rating_saved',
-      data: { service: mapService(updatedService, userId) },
-    });
+    const err: AppError = new Error();
+    err.statusCode = 501;
+    err.messageKey = 'service.rating_not_available';
+    return next(err);
   } catch (err) {
     next(err);
   }
@@ -501,7 +506,7 @@ export const updateService = async (
 
     const existing = await prisma.service.findUnique({
       where: { id },
-      select: { owner_id: true, status: true },
+      select: { owner_id: true, status: true, branch_id: true, address: true },
     });
 
     if (!existing) {
@@ -520,6 +525,20 @@ export const updateService = async (
       const err: AppError = new Error();
       err.statusCode = 400;
       err.messageKey = 'service.cannot_update_in_current_status';
+      return next(err);
+    }
+
+    // If branch_id is being changed, validate access on the new branch
+    if (body.branch_id !== undefined && body.branch_id !== null) {
+      if (!(await validateBranchAccess(body.branch_id, userId, next))) return;
+    }
+
+    const nextBranchId = body.branch_id !== undefined ? body.branch_id : existing.branch_id;
+    const nextAddress = body.address !== undefined ? body.address : existing.address;
+    if (!nextBranchId && !nextAddress?.trim()) {
+      const err: AppError = new Error();
+      err.statusCode = 400;
+      err.messageKey = 'service.branch_or_address_required';
       return next(err);
     }
 
@@ -623,7 +642,7 @@ export const submitService = async (
 
     const existing = await prisma.service.findUnique({
       where: { id },
-      select: { owner_id: true, status: true },
+      select: { owner_id: true, status: true, branch_id: true },
     });
 
     if (!existing) {
@@ -644,6 +663,11 @@ export const submitService = async (
       err.statusCode = 400;
       err.messageKey = 'service.cannot_submit_in_current_status';
       return next(err);
+    }
+
+    // Re-validate branch access at submit time (membership may have changed)
+    if (existing.branch_id) {
+      if (!(await validateBranchAccess(existing.branch_id, userId, next))) return;
     }
 
     const service = await prisma.service.update({

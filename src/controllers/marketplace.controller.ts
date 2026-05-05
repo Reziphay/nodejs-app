@@ -11,11 +11,11 @@ export const getMarketplaceFacets = async (
   try {
     const [serviceCategories, brandCategories] = await Promise.all([
       prisma.serviceCategory.findMany({
-        where: { services: { some: { status: 'ACTIVE' } } },
+        where: { services: { some: publicServiceWhere() } },
         select: {
           id: true,
           key: true,
-          _count: { select: { services: { where: { status: 'ACTIVE' } } } },
+          _count: { select: { services: { where: publicServiceWhere() } } },
         },
         orderBy: { key: 'asc' },
       }),
@@ -70,6 +70,25 @@ function ratingSummary(ratings: { value: number }[]) {
 
 function shuffle<T>(items: T[]): T[] {
   return [...items].sort(() => Math.random() - 0.5);
+}
+
+function publicServiceWhere(extra: Record<string, unknown> = {}) {
+  const { AND, ...rest } = extra as { AND?: unknown } & Record<string, unknown>;
+  const andClauses = [
+    {
+      OR: [
+        { branch_id: null },
+        { branch: { brand: { status: 'ACTIVE' as const } } },
+      ],
+    },
+    ...(AND ? (Array.isArray(AND) ? AND : [AND]) : []),
+  ];
+
+  return {
+    status: 'ACTIVE' as const,
+    ...rest,
+    AND: andClauses,
+  };
 }
 
 const homeBrandSelect = {
@@ -165,7 +184,6 @@ function mapHomeBrand(raw: any, requesterId?: string) {
 }
 
 function mapHomeService(raw: any, requesterId?: string) {
-  const summary = ratingSummary(raw.ratings ?? []);
   const brandSummary = ratingSummary(raw.branch?.brand?.ratings ?? []);
   return {
     id: raw.id,
@@ -204,8 +222,8 @@ function mapHomeService(raw: any, requesterId?: string) {
       order: item.order,
       url: buildFileUrl(item.media.storage_path),
     })),
-    rating: summary.rating,
-    rating_count: summary.rating_count,
+    rating: null,
+    rating_count: 0,
     my_rating: requesterId
       ? raw.ratings?.find((rating: { user_id: string }) => rating.user_id === requesterId)?.value ?? null
       : null,
@@ -216,8 +234,12 @@ function mapHomeService(raw: any, requesterId?: string) {
 
 async function randomServiceIds(limit: number) {
   return prisma.$queryRaw<{ id: string }[]>`
-    SELECT id FROM "Service"
-    WHERE status = 'ACTIVE'
+    SELECT service.id
+    FROM "Service" service
+    LEFT JOIN "Branch" branch ON branch.id = service.branch_id
+    LEFT JOIN "Brand" brand ON brand.id = branch.brand_id
+    WHERE service.status = 'ACTIVE'
+      AND (service.branch_id IS NULL OR brand.status = 'ACTIVE')
     ORDER BY RANDOM()
     LIMIT ${limit}
   `;
@@ -236,7 +258,7 @@ async function servicesByIds(ids: string[]) {
   if (ids.length === 0) return [];
   const order = new Map(ids.map((id, index) => [id, index]));
   const services = await prisma.service.findMany({
-    where: { id: { in: ids }, status: 'ACTIVE' },
+    where: publicServiceWhere({ id: { in: ids } }),
     select: homeServiceSelect,
   });
   return services.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
@@ -268,11 +290,11 @@ export const getMarketplaceHome = async (
   try {
     const userId = req.user?.sub;
 
-    const [randomServiceRows, recentServices, recentBrands, topServicePool, topBrandPool, favoriteServices, favoriteBrands, usoPool] =
+    const [randomServiceRows, recentServices, recentBrands, topBrandPool, favoriteServices, favoriteBrands, usoPool] =
       await Promise.all([
         randomServiceIds(20),
         prisma.service.findMany({
-          where: { status: 'ACTIVE' },
+          where: publicServiceWhere(),
           select: homeServiceSelect,
           orderBy: { created_at: 'desc' },
           take: 10,
@@ -282,12 +304,6 @@ export const getMarketplaceHome = async (
           select: homeBrandSelect,
           orderBy: { created_at: 'desc' },
           take: 10,
-        }),
-        prisma.service.findMany({
-          where: { status: 'ACTIVE', ratings: { some: {} } },
-          select: homeServiceSelect,
-          orderBy: { created_at: 'desc' },
-          take: 220,
         }),
         prisma.brand.findMany({
           where: { status: 'ACTIVE', ratings: { some: {} } },
@@ -297,7 +313,7 @@ export const getMarketplaceHome = async (
         }),
         userId
           ? prisma.favoriteService.findMany({
-              where: { user_id: userId, service: { status: 'ACTIVE' } },
+              where: { user_id: userId, service: publicServiceWhere() },
               select: {
                 service_id: true,
                 service: {
@@ -322,7 +338,7 @@ export const getMarketplaceHome = async (
         prisma.user.findMany({
           where: {
             type: 'uso',
-            OR: [{ brands: { some: { status: 'ACTIVE' } } }, { services: { some: { status: 'ACTIVE' } } }],
+            OR: [{ brands: { some: { status: 'ACTIVE' } } }, { services: { some: publicServiceWhere() } }],
           },
           select: {
             id: true,
@@ -331,7 +347,7 @@ export const getMarketplaceHome = async (
             email: true,
             avatar_media: { select: { storage_path: true } },
             brands: { where: { status: 'ACTIVE' }, select: { ratings: { select: { value: true } } } },
-            services: { where: { status: 'ACTIVE' }, select: { ratings: { select: { value: true } } } },
+            services: { where: publicServiceWhere(), select: { id: true } },
           },
           take: 160,
         }),
@@ -353,11 +369,10 @@ export const getMarketplaceHome = async (
     const [recommendedServicePool, recommendedBrandPool] = await Promise.all([
       serviceCategoryIds.length > 0
         ? prisma.service.findMany({
-            where: {
-              status: 'ACTIVE',
+            where: publicServiceWhere({
               service_category_id: { in: serviceCategoryIds },
               id: { notIn: favoriteServices.map((favorite: any) => favorite.service_id) },
-            },
+            }),
             select: homeServiceSelect,
             take: 80,
           })
@@ -379,7 +394,6 @@ export const getMarketplaceHome = async (
       .map((user) => {
         const ratings = [
           ...user.brands.flatMap((brand) => brand.ratings),
-          ...user.services.flatMap((service) => service.ratings),
         ];
         return {
           id: user.id,
@@ -406,7 +420,7 @@ export const getMarketplaceHome = async (
         recent_brands: recentBrands.map((brand) => mapHomeBrand(brand, userId)),
         recommended_services: shuffle(recommendedServicePool).slice(0, 10).map((service) => mapHomeService(service, userId)),
         recommended_brands: shuffle(recommendedBrandPool).slice(0, 10).map((brand) => mapHomeBrand(brand, userId)),
-        top_rated_services: topRated(topServicePool).slice(0, 10).map((service) => mapHomeService(service, userId)),
+        top_rated_services: [],
         top_rated_brands: topRated(topBrandPool).slice(0, 10).map((brand) => mapHomeBrand(brand, userId)),
         top_usos: topUsos,
       },
@@ -517,8 +531,7 @@ export const searchMarketplace = async (
         : Promise.resolve([]),
       include('service')
         ? prisma.service.findMany({
-            where: {
-              status: 'ACTIVE',
+            where: publicServiceWhere({
               ...(category && { service_category_id: category }),
               OR: [
                 { title: { contains: q, mode: 'insensitive' } },
@@ -526,7 +539,7 @@ export const searchMarketplace = async (
                 { address: { contains: q, mode: 'insensitive' } },
                 { service_category: { key: { contains: q, mode: 'insensitive' } } },
               ],
-            },
+            }),
             select: {
               id: true,
               title: true,
@@ -551,7 +564,7 @@ export const searchMarketplace = async (
                 {
                   OR: [
                     { brands: { some: { status: 'ACTIVE' } } },
-                    { services: { some: { status: 'ACTIVE' } } },
+                    { services: { some: publicServiceWhere() } },
                   ],
                 },
               ],
@@ -586,7 +599,7 @@ export const searchMarketplace = async (
         : Promise.resolve([]),
       include('address')
         ? prisma.service.findMany({
-            where: { status: 'ACTIVE', address: { contains: q, mode: 'insensitive' } },
+            where: publicServiceWhere({ address: { contains: q, mode: 'insensitive' } }),
             select: { id: true, title: true, address: true },
             take: limit,
           })
@@ -625,7 +638,8 @@ export const searchMarketplace = async (
       href: buildSearchHref('service', service.id),
       category_id: service.service_category?.id ?? null,
       category_key: service.service_category?.key ?? null,
-      ...ratingSummary(service.ratings),
+      rating: null,
+      rating_count: 0,
     }));
     const userItems = users.map((user) => ({
       id: user.id,

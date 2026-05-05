@@ -1,8 +1,12 @@
 import { z } from 'zod';
+import { sanitizeRichHtml } from '../lib/rich-text';
+
+const richDescription = (max: number) =>
+  z.string().max(max).trim().transform((v) => sanitizeRichHtml(v));
 
 export const createServiceSchema = z.object({
   title: z.string().min(2, 'Title must be at least 2 characters').max(150).trim(),
-  description: z.string().max(2000).trim().optional(),
+  description: richDescription(2000).optional(),
   branch_id: z.string().cuid('Invalid branch id').nullable().optional(),
   service_category_id: z.string().cuid('Invalid category id').nullable().optional(),
   price: z.number().positive().optional(),
@@ -19,7 +23,7 @@ export type CreateServiceInput = z.infer<typeof createServiceSchema>;
 
 export const updateServiceSchema = z.object({
   title: z.string().min(2).max(150).trim().optional(),
-  description: z.string().max(2000).trim().nullable().optional(),
+  description: richDescription(2000).nullable().optional(),
   branch_id: z.string().cuid('Invalid branch id').nullable().optional(),
   service_category_id: z.string().cuid('Invalid category id').nullable().optional(),
   price: z.number().positive().nullable().optional(),

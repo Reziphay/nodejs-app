@@ -447,11 +447,22 @@ export async function approveService(
 ) {
   const service = await prisma.service.findUnique({
     where: { id: serviceId },
-    select: { id: true, status: true, owner_id: true, title: true },
+    select: {
+      id: true,
+      status: true,
+      owner_id: true,
+      title: true,
+      branch: { select: { brand: { select: { status: true } } } },
+    },
   });
 
   if (!service) return { notFound: true } as const;
   if (service.status !== 'PENDING') return { wrongStatus: true } as const;
+  // Branch-linked services may only be approved if their parent brand is ACTIVE.
+  // Direct services (no branch) bypass this check.
+  if (service.branch && service.branch.brand.status !== 'ACTIVE') {
+    return { inactiveBrand: true } as const;
+  }
 
   await prisma.$transaction([
     prisma.service.update({

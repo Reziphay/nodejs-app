@@ -1,4 +1,8 @@
 import { z } from 'zod';
+import { sanitizeRichHtml } from '../lib/rich-text';
+
+const richDescription = (max: number) =>
+  z.string().max(max).trim().transform((v) => sanitizeRichHtml(v));
 
 // ─── Branch ───────────────────────────────────────────────────────────────────
 
@@ -12,7 +16,7 @@ const branchBreakSchema = z.object({
 export const createBranchSchema = z
   .object({
     name: z.string().min(2, 'Branch name must be at least 2 characters').max(100).trim(),
-    description: z.string().max(1000).trim().optional(),
+    description: richDescription(1000).optional(),
     address1: z.string().min(2).max(200).trim(),
     address2: z.string().max(200).trim().optional(),
     phone: z.string().regex(/^\+?\d{7,20}$/, 'Invalid phone number').optional(),
@@ -33,7 +37,7 @@ export type CreateBranchInput = z.infer<typeof createBranchSchema>;
 export const updateBranchSchema = z
   .object({
     name: z.string().min(2).max(100).trim().optional(),
-    description: z.string().max(1000).trim().nullable().optional(),
+    description: richDescription(1000).nullable().optional(),
     address1: z.string().min(2).max(200).trim().optional(),
     address2: z.string().max(200).trim().nullable().optional(),
     phone: z.string().regex(/^\+?\d{7,20}$/, 'Invalid phone number').nullable().optional(),
@@ -82,7 +86,7 @@ const socialLinksShape = {
 
 export const createBrandSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters').max(100).trim(),
-  description: z.string().max(1000).trim().optional(),
+  description: richDescription(1000).optional(),
   categoryIds: z.array(z.string().cuid('Invalid category id')).optional().default([]),
   logo_media_id: z.string().cuid('Invalid media id').optional(),
   gallery_media_ids: z.array(z.string().cuid('Invalid media id')).optional().default([]),
@@ -94,7 +98,7 @@ export type CreateBrandInput = z.infer<typeof createBrandSchema>;
 
 export const updateBrandSchema = z.object({
   name: z.string().min(2).max(100).trim().optional(),
-  description: z.string().max(1000).trim().nullable().optional(),
+  description: richDescription(1000).nullable().optional(),
   categoryIds: z.array(z.string().cuid('Invalid category id')).optional(),
   logo_media_id: z.string().cuid('Invalid media id').nullable().optional(),
   gallery_media_ids: z.array(z.string().cuid('Invalid media id')).optional(),

@@ -19,6 +19,23 @@ function roundRating(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
+function publicServiceWhere(extra: Record<string, unknown> = {}) {
+  const { AND, ...rest } = extra as { AND?: unknown } & Record<string, unknown>;
+  return {
+    status: 'ACTIVE' as const,
+    ...rest,
+    AND: [
+      {
+        OR: [
+          { branch_id: null },
+          { branch: { brand: { status: 'ACTIVE' as const } } },
+        ],
+      },
+      ...(AND ? (Array.isArray(AND) ? AND : [AND]) : []),
+    ],
+  };
+}
+
 const branchSelect = {
   id: true,
   brand_id: true,
@@ -176,11 +193,6 @@ function mapBrand(raw: any, requesterId?: string) {
 }
 
 function mapService(raw: any, requesterId?: string) {
-  const ratingCount = raw.ratings?.length ?? 0;
-  const ratingAverage =
-    ratingCount > 0
-      ? roundRating(raw.ratings.reduce((sum: number, rating: { value: number }) => sum + rating.value, 0) / ratingCount)
-      : null;
   const myRating =
     requesterId
       ? raw.ratings?.find((rating: { user_id: string }) => rating.user_id === requesterId)?.value ?? null
@@ -206,8 +218,8 @@ function mapService(raw: any, requesterId?: string) {
       order: img.order,
       url: buildFileUrl(img.media.storage_path),
     })),
-    rating: ratingAverage,
-    rating_count: ratingCount,
+    rating: null,
+    rating_count: 0,
     my_rating: myRating,
     created_at: raw.created_at.toISOString(),
     updated_at: raw.updated_at.toISOString(),
@@ -230,7 +242,7 @@ export const listFavorites = async (
         orderBy: { created_at: 'desc' },
       }),
       prisma.favoriteService.findMany({
-        where: { user_id: userId, service: { status: 'ACTIVE' } },
+        where: { user_id: userId, service: publicServiceWhere() },
         include: { service: { select: serviceSelect } },
         orderBy: { created_at: 'desc' },
       }),
@@ -319,7 +331,7 @@ export const addFavoriteService = async (
 
     const userId = req.user.sub;
     const serviceId = req.params['id'] as string;
-    const service = await prisma.service.findFirst({ where: { id: serviceId, status: 'ACTIVE' }, select: { id: true } });
+    const service = await prisma.service.findFirst({ where: publicServiceWhere({ id: serviceId }), select: { id: true } });
 
     if (!service) {
       const err: AppError = new Error();

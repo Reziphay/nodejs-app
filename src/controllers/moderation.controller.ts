@@ -224,6 +224,13 @@ export const approveService = async (
       return next(err);
     }
 
+    if ('inactiveBrand' in result) {
+      const err: AppError = new Error();
+      err.statusCode = 400;
+      err.messageKey = 'service.cannot_approve_inactive_brand';
+      return next(err);
+    }
+
     sendSuccess({ res, status: 200, message: 'service.approved' });
   } catch (err) {
     next(err);
