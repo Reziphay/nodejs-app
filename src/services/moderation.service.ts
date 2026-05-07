@@ -72,20 +72,12 @@ export async function getModerationQueue(type?: 'brand' | 'service') {
                 avatar_media: { select: { storage_path: true } },
               },
             },
-            branch: {
+            brand: {
               select: {
                 id: true,
                 name: true,
-                address1: true,
-                address2: true,
-                brand: {
-                  select: {
-                    id: true,
-                    name: true,
-                    logo_media: { select: { storage_path: true } },
-                    ratings: { select: { value: true } },
-                  },
-                },
+                logo_media: { select: { storage_path: true } },
+                ratings: { select: { value: true } },
               },
             },
           },
@@ -124,20 +116,20 @@ export async function getModerationQueue(type?: 'brand' | 'service') {
     }));
 
   const serviceItems = services.map((s) => ({
-      ...(s.branch?.brand
+      ...(s.brand
         ? {
             brand: {
-              id: s.branch.brand.id,
-              name: s.branch.brand.name,
-              logo_url: s.branch.brand.logo_media
-                ? buildFileUrl(s.branch.brand.logo_media.storage_path)
+              id: s.brand.id,
+              name: s.brand.name,
+              logo_url: s.brand.logo_media
+                ? buildFileUrl(s.brand.logo_media.storage_path)
                 : null,
               rating:
-                s.branch.brand.ratings.length > 0
-                  ? s.branch.brand.ratings.reduce((sum, rating) => sum + rating.value, 0) /
-                    s.branch.brand.ratings.length
+                s.brand.ratings.length > 0
+                  ? s.brand.ratings.reduce((sum: number, rating: { value: number }) => sum + rating.value, 0) /
+                    s.brand.ratings.length
                   : null,
-              rating_count: s.branch.brand.ratings.length,
+              rating_count: s.brand.ratings.length,
             },
           }
         : {}),
@@ -147,17 +139,8 @@ export async function getModerationQueue(type?: 'brand' | 'service') {
       description: s.description ?? undefined,
       status: s.status,
       service_category: s.service_category ?? null,
-      address: s.branch
-        ? [s.branch.address1, s.branch.address2].filter(Boolean).join(', ')
-        : (s.address ?? null),
-      branch: s.branch
-        ? {
-            id: s.branch.id,
-            name: s.branch.name,
-            address1: s.branch.address1,
-            address2: s.branch.address2,
-          }
-        : null,
+      address: s.address ?? null,
+      branch: null,
       price: s.price ? Number(s.price) : null,
       price_type: s.price_type,
       owner: mapOwner(s.owner),
@@ -280,20 +263,12 @@ export async function getServiceModerationDetail(serviceId: string) {
         },
         orderBy: { order: 'asc' },
       },
-      branch: {
+      brand: {
         select: {
           id: true,
           name: true,
-          address1: true,
-          address2: true,
-          brand: {
-            select: {
-              id: true,
-              name: true,
-              logo_media: { select: { storage_path: true } },
-              ratings: { select: { value: true } },
-            },
-          },
+          logo_media: { select: { storage_path: true } },
+          ratings: { select: { value: true } },
         },
       },
       service_category: { select: { id: true, key: true } },
@@ -325,27 +300,22 @@ export async function getServiceModerationDetail(serviceId: string) {
       order: img.order,
       url: buildFileUrl(img.media.storage_path),
     })),
-    branch: service.branch
+    brand: service.brand
       ? {
-          id: service.branch.id,
-          name: service.branch.name,
-          address1: service.branch.address1,
-          address2: service.branch.address2 ?? undefined,
-          brand: {
-            id: service.branch.brand.id,
-            name: service.branch.brand.name,
-            logo_url: service.branch.brand.logo_media
-              ? buildFileUrl(service.branch.brand.logo_media.storage_path)
+          id: service.brand.id,
+          name: service.brand.name,
+          logo_url: service.brand.logo_media
+            ? buildFileUrl(service.brand.logo_media.storage_path)
+            : null,
+          rating:
+            service.brand.ratings.length > 0
+              ? service.brand.ratings.reduce((sum: number, rating: { value: number }) => sum + rating.value, 0) /
+                service.brand.ratings.length
               : null,
-            rating:
-              service.branch.brand.ratings.length > 0
-                ? service.branch.brand.ratings.reduce((sum, rating) => sum + rating.value, 0) /
-                  service.branch.brand.ratings.length
-                : null,
-            rating_count: service.branch.brand.ratings.length,
-          },
+          rating_count: service.brand.ratings.length,
         }
       : null,
+    branch: null,
     created_at: service.created_at.toISOString(),
     updated_at: service.updated_at.toISOString(),
   };
@@ -452,15 +422,15 @@ export async function approveService(
       status: true,
       owner_id: true,
       title: true,
-      branch: { select: { brand: { select: { status: true } } } },
+      brand: { select: { status: true } },
     },
   });
 
   if (!service) return { notFound: true } as const;
   if (service.status !== 'PENDING') return { wrongStatus: true } as const;
-  // Branch-linked services may only be approved if their parent brand is ACTIVE.
-  // Direct services (no branch) bypass this check.
-  if (service.branch && service.branch.brand.status !== 'ACTIVE') {
+  // Brand-linked services may only be approved if their parent brand is ACTIVE.
+  // Direct services (no brand) bypass this check.
+  if (service.brand && service.brand.status !== 'ACTIVE') {
     return { inactiveBrand: true } as const;
   }
 

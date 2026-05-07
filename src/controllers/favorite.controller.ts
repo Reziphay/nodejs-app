@@ -27,8 +27,8 @@ function publicServiceWhere(extra: Record<string, unknown> = {}) {
     AND: [
       {
         OR: [
-          { branch_id: null },
-          { branch: { brand: { status: 'ACTIVE' as const } } },
+          { brand_id: null },
+          { brand: { status: 'ACTIVE' as const } },
         ],
       },
       ...(AND ? (Array.isArray(AND) ? AND : [AND]) : []),
@@ -96,7 +96,7 @@ const serviceSelect = {
   title: true,
   description: true,
   owner_id: true,
-  branch_id: true,
+  brand_id: true,
   service_category_id: true,
   service_category: { select: { id: true, key: true } },
   price: true,
@@ -122,12 +122,7 @@ const serviceSelect = {
       user_id: true,
     },
   },
-  branch: {
-    select: {
-      id: true,
-      brand: { select: brandSelect },
-    },
-  },
+  brand: { select: brandSelect },
 } as const;
 
 function mapBranch(raw: any) {
@@ -203,7 +198,8 @@ function mapService(raw: any, requesterId?: string) {
     title: raw.title,
     description: raw.description ?? undefined,
     owner_id: raw.owner_id,
-    branch_id: raw.branch_id ?? null,
+    brand_id: raw.brand_id ?? null,
+    brand: raw.brand ? mapBrand(raw.brand, requesterId) : null,
     service_category_id: raw.service_category_id ?? null,
     service_category: raw.service_category ?? null,
     price: raw.price ? Number(raw.price) : null,
@@ -250,7 +246,7 @@ export const listFavorites = async (
 
     const serviceBrandMap = new Map<string, any>();
     for (const favorite of favoriteServices) {
-      const brand = (favorite.service as any).branch?.brand;
+      const brand = (favorite.service as any).brand;
       if (brand) serviceBrandMap.set(brand.id, brand);
     }
 

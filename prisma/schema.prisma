@@ -27,6 +27,20 @@ enum TeamMemberRole {
   MEMBER
 }
 
+// ─── Team-member ↔ Service assignment ─────────────────────────────────────────
+
+enum ServiceAssignmentStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+}
+
+enum ServiceAssignmentInitiator {
+  MEMBER
+  OWNER
+}
+
 enum MediaKind {
   avatar
   document
@@ -63,49 +77,49 @@ enum ModerationOutcome {
 }
 
 model User {
-  id               String    @id @default(cuid())
-  first_name       String
-  last_name        String
-  birthday         DateTime  @db.Date
+  id              String   @id @default(cuid())
+  first_name      String
+  last_name       String
+  birthday        DateTime @db.Date
   // Full E.164 international number, e.g. "+9941234567". Prefix and local
   // number are accepted separately from the frontend and combined server-side
   // before storage so uniqueness is enforced on the complete international number.
-  phone            String?   @unique
-  country          String
-  email            String    @unique
-  hashed_password  String
-  type             UserType  @default(uso)
-  phone_verified   Boolean   @default(false)
-  email_verified   Boolean   @default(false)
-  avatar_media_id  String?
-  instagram_url    String?
-  facebook_url     String?
-  youtube_url      String?
-  whatsapp_url     String?
-  linkedin_url     String?
-  x_url            String?
-  website_url      String?
+  phone           String?  @unique
+  country         String
+  email           String   @unique
+  hashed_password String
+  type            UserType @default(uso)
+  phone_verified  Boolean  @default(false)
+  email_verified  Boolean  @default(false)
+  avatar_media_id String?
+  instagram_url   String?
+  facebook_url    String?
+  youtube_url     String?
+  whatsapp_url    String?
+  linkedin_url    String?
+  x_url           String?
+  website_url     String?
 
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
 
-  refresh_tokens       RefreshToken[]
-  media                Media[]
-  brands               Brand[]
-  services             Service[]
-  brand_transfers      BrandTransfer[] @relation("BrandTransferRequester")
-  received_transfers   BrandTransfer[] @relation("BrandTransferRecipient")
-  brand_ratings        BrandRating[]
-  service_ratings      ServiceRating[]
-  favorite_brands      FavoriteBrand[]
-  favorite_services    FavoriteService[]
-  notifications        Notification[]
-  teams_created             Team[]                       @relation("TeamCreator")
-  team_memberships          TeamMember[]                 @relation("TeamMemberUser")
-  invitations_sent          TeamMember[]                 @relation("TeamMemberInviter")
-  feed_dismissals           NotificationFeedDismissal[]
-  feed_state                NotificationFeedState?
-  moderation_reviews        ModerationReview[]           @relation("ModerationReviewer")
+  refresh_tokens     RefreshToken[]
+  media              Media[]
+  brands             Brand[]
+  services           Service[]
+  brand_transfers    BrandTransfer[]             @relation("BrandTransferRequester")
+  received_transfers BrandTransfer[]             @relation("BrandTransferRecipient")
+  brand_ratings      BrandRating[]
+  service_ratings    ServiceRating[]
+  favorite_brands    FavoriteBrand[]
+  favorite_services  FavoriteService[]
+  notifications      Notification[]
+  teams_created      Team[]                      @relation("TeamCreator")
+  team_memberships   TeamMember[]                @relation("TeamMemberUser")
+  invitations_sent   TeamMember[]                @relation("TeamMemberInviter")
+  feed_dismissals    NotificationFeedDismissal[]
+  feed_state         NotificationFeedState?
+  moderation_reviews ModerationReview[]          @relation("ModerationReviewer")
 
   avatar_media Media? @relation("UserAvatar", fields: [avatar_media_id], references: [id], onDelete: SetNull)
 
@@ -131,10 +145,10 @@ model Media {
 
   owner User @relation(fields: [owner_id], references: [id], onDelete: Cascade)
 
-  avatar_for    User[]         @relation("UserAvatar")
-  brand_logo    Brand[]        @relation("BrandLogo")
-  brand_gallery BrandGallery[] @relation("BrandGallery")
-  branch_covers Branch[]       @relation("BranchCover")
+  avatar_for     User[]         @relation("UserAvatar")
+  brand_logo     Brand[]        @relation("BrandLogo")
+  brand_gallery  BrandGallery[] @relation("BrandGallery")
+  branch_covers  Branch[]       @relation("BranchCover")
   service_images ServiceMedia[]
 
   @@index([owner_id])
@@ -169,27 +183,28 @@ model ServiceCategory {
 }
 
 model Brand {
-  id            String      @id @default(cuid())
-  name          String
-  description   String?
+  id               String      @id @default(cuid())
+  name             String
+  description      String?
   status           BrandStatus @default(PENDING)
   rejection_reason String?
-  owner_id      String
-  logo_media_id String?
-  instagram_url String?
-  facebook_url  String?
-  youtube_url   String?
-  whatsapp_url  String?
-  linkedin_url  String?
-  x_url         String?
-  website_url   String?
-  created_at    DateTime    @default(now())
-  updated_at    DateTime    @updatedAt
+  owner_id         String
+  logo_media_id    String?
+  instagram_url    String?
+  facebook_url     String?
+  youtube_url      String?
+  whatsapp_url     String?
+  linkedin_url     String?
+  x_url            String?
+  website_url      String?
+  created_at       DateTime    @default(now())
+  updated_at       DateTime    @updatedAt
 
-  owner      User           @relation(fields: [owner_id], references: [id], onDelete: Cascade)
-  logo_media Media?         @relation("BrandLogo", fields: [logo_media_id], references: [id], onDelete: SetNull)
+  owner      User            @relation(fields: [owner_id], references: [id], onDelete: Cascade)
+  logo_media Media?          @relation("BrandLogo", fields: [logo_media_id], references: [id], onDelete: SetNull)
   gallery    BrandGallery[]
   branches   Branch[]
+  services   Service[]
   categories BrandCategory[]
   ratings    BrandRating[]
   favorites  FavoriteBrand[]
@@ -231,7 +246,6 @@ model Branch {
   breaks      BranchBreak[]
   team        Team?         @relation("BranchTeam")
   cover_media Media?        @relation("BranchCover", fields: [cover_media_id], references: [id], onDelete: SetNull)
-  services    Service[]
 
   @@index([brand_id])
 }
@@ -246,17 +260,17 @@ model BranchBreak {
 }
 
 model BrandTransfer {
-  id             String              @id @default(cuid())
-  brand_id       String
-  from_user_id   String
-  to_user_id     String
-  status         BrandTransferStatus @default(PENDING)
-  created_at     DateTime            @default(now())
-  updated_at     DateTime            @updatedAt
+  id           String              @id @default(cuid())
+  brand_id     String
+  from_user_id String
+  to_user_id   String
+  status       BrandTransferStatus @default(PENDING)
+  created_at   DateTime            @default(now())
+  updated_at   DateTime            @updatedAt
 
-  brand      Brand @relation(fields: [brand_id], references: [id], onDelete: Cascade)
-  from_user  User  @relation("BrandTransferRequester", fields: [from_user_id], references: [id], onDelete: Cascade)
-  to_user    User  @relation("BrandTransferRecipient", fields: [to_user_id], references: [id], onDelete: Cascade)
+  brand     Brand @relation(fields: [brand_id], references: [id], onDelete: Cascade)
+  from_user User  @relation("BrandTransferRequester", fields: [from_user_id], references: [id], onDelete: Cascade)
+  to_user   User  @relation("BrandTransferRecipient", fields: [to_user_id], references: [id], onDelete: Cascade)
 
   @@index([brand_id])
   @@index([from_user_id])
@@ -349,15 +363,15 @@ model RefreshToken {
 // One Team per Branch. Created automatically when a Branch is created.
 // The brand owner is automatically the first ACCEPTED OWNER member.
 model Team {
-  id                  String   @id @default(cuid())
-  branch_id           String   @unique
-  created_by_user_id  String
-  created_at          DateTime @default(now())
-  updated_at          DateTime @updatedAt
+  id                 String   @id @default(cuid())
+  branch_id          String   @unique
+  created_by_user_id String
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
 
-  branch   Branch       @relation("BranchTeam", fields: [branch_id], references: [id], onDelete: Cascade)
-  creator  User         @relation("TeamCreator", fields: [created_by_user_id], references: [id], onDelete: Cascade)
-  members  TeamMember[]
+  branch  Branch       @relation("BranchTeam", fields: [branch_id], references: [id], onDelete: Cascade)
+  creator User         @relation("TeamCreator", fields: [created_by_user_id], references: [id], onDelete: Cascade)
+  members TeamMember[]
 
   @@index([created_by_user_id])
 }
@@ -366,18 +380,20 @@ model Team {
 // Re-inviting a REJECTED/REMOVED user updates this same row (upsert pattern).
 // The OWNER row is immutable through normal team endpoints.
 model TeamMember {
-  id                  String           @id @default(cuid())
-  team_id             String
-  user_id             String
-  invited_by_user_id  String
-  status              TeamMemberStatus @default(PENDING)
-  role                TeamMemberRole   @default(MEMBER)
-  created_at          DateTime         @default(now())
-  updated_at          DateTime         @updatedAt
+  id                 String           @id @default(cuid())
+  team_id            String
+  user_id            String
+  invited_by_user_id String
+  status             TeamMemberStatus @default(PENDING)
+  role               TeamMemberRole   @default(MEMBER)
+  created_at         DateTime         @default(now())
+  updated_at         DateTime         @updatedAt
 
   team       Team @relation(fields: [team_id], references: [id], onDelete: Cascade)
   user       User @relation("TeamMemberUser", fields: [user_id], references: [id], onDelete: Cascade)
   invited_by User @relation("TeamMemberInviter", fields: [invited_by_user_id], references: [id], onDelete: Cascade)
+
+  service_assignments TeamMemberServiceAssignment[]
 
   // One active membership record per (team, user). Re-invites use upsert.
   @@unique([team_id, user_id])
@@ -388,30 +404,31 @@ model TeamMember {
 // ─── Service models ───────────────────────────────────────────────────────────
 
 model Service {
-  id                   String        @id @default(cuid())
-  title                String
-  description          String?
-  owner_id             String
-  branch_id            String?
-  service_category_id  String?
-  price                Decimal?      @db.Decimal(10, 2)
-  price_type           PriceType     @default(FIXED)
-  duration             Int?
-  address              String?
-  status               ServiceStatus @default(DRAFT)
-  rejection_reason     String?
-  created_at           DateTime      @default(now())
-  updated_at           DateTime      @updatedAt
+  id                  String        @id @default(cuid())
+  title               String
+  description         String?
+  owner_id            String
+  brand_id            String?
+  service_category_id String?
+  price               Decimal?      @db.Decimal(10, 2)
+  price_type          PriceType     @default(FIXED)
+  duration            Int?
+  address             String?
+  status              ServiceStatus @default(DRAFT)
+  rejection_reason    String?
+  created_at          DateTime      @default(now())
+  updated_at          DateTime      @updatedAt
 
-  owner            User             @relation(fields: [owner_id], references: [id], onDelete: Cascade)
-  branch           Branch?          @relation(fields: [branch_id], references: [id], onDelete: SetNull)
-  service_category ServiceCategory? @relation(fields: [service_category_id], references: [id], onDelete: SetNull)
-  images           ServiceMedia[]
-  ratings          ServiceRating[]
-  favorites        FavoriteService[]
+  owner              User                          @relation(fields: [owner_id], references: [id], onDelete: Cascade)
+  brand              Brand?                        @relation(fields: [brand_id], references: [id], onDelete: SetNull)
+  service_category   ServiceCategory?              @relation(fields: [service_category_id], references: [id], onDelete: SetNull)
+  images             ServiceMedia[]
+  ratings            ServiceRating[]
+  favorites          FavoriteService[]
+  member_assignments TeamMemberServiceAssignment[]
 
   @@index([owner_id])
-  @@index([branch_id])
+  @@index([brand_id])
   @@index([status])
   @@index([service_category_id])
 }
@@ -472,6 +489,33 @@ model ServiceMedia {
   @@index([service_id])
 }
 
+// ─── Team-member service assignment ──────────────────────────────────────────
+
+// Bridges a TeamMember to one of its brand's Services. Either side can
+// initiate (initiated_by). Status tracks the bidirectional approval flow:
+// MEMBER-initiated → owner approves; OWNER-initiated → member accepts.
+// One active record per (team_member, service); re-requests upsert this row.
+model TeamMemberServiceAssignment {
+  id             String                     @id @default(cuid())
+  team_member_id String
+  service_id     String
+  status         ServiceAssignmentStatus    @default(PENDING)
+  initiated_by   ServiceAssignmentInitiator
+  proposed_description String?
+  proposed_price       Decimal?             @db.Decimal(10, 2)
+  proposed_duration    Int?
+  responded_at   DateTime?
+  created_at     DateTime                   @default(now())
+  updated_at     DateTime                   @updatedAt
+
+  team_member TeamMember @relation(fields: [team_member_id], references: [id], onDelete: Cascade)
+  service     Service    @relation(fields: [service_id], references: [id], onDelete: Cascade)
+
+  @@unique([team_member_id, service_id])
+  @@index([service_id])
+  @@index([status])
+}
+
 // ─── Moderation Review ───────────────────────────────────────────────────────
 
 model ModerationReview {
@@ -481,7 +525,7 @@ model ModerationReview {
   reviewer_id      String
   outcome          ModerationOutcome
   rejection_reason String?
-  checklist        Json?                // Array of {key: string, label: string, passed: boolean}
+  checklist        Json? // Array of {key: string, label: string, passed: boolean}
   created_at       DateTime             @default(now())
 
   reviewer User @relation("ModerationReviewer", fields: [reviewer_id], references: [id], onDelete: Cascade)

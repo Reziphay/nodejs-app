@@ -10,6 +10,7 @@ import serviceRoute from './service.route';
 import moderationRoute from './moderation.route';
 import marketplaceRoute from './marketplace.route';
 import favoriteRoute from './favorite.route';
+import teamServiceAssignmentRoute from './team-service-assignment.route';
 
 const router: Router = Router();
 
@@ -21,6 +22,7 @@ router.use('/', brandRoute);
 router.use('/notifications', notificationRoute);
 router.use('/', teamRoute);
 router.use('/', serviceRoute);
+router.use('/', teamServiceAssignmentRoute);
 router.use('/', moderationRoute);
 router.use('/', marketplaceRoute);
 router.use('/', favoriteRoute);

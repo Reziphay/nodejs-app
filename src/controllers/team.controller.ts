@@ -82,7 +82,8 @@ const teamMemberSelect = {
 } as const;
 
 // ─── GET /brands/:id/team-workspace ──────────────────────────────────────────
-// Returns brand summary + all branches with their team state. Owner only.
+// Returns brand summary + all branches with their team state. Brand owners and
+// accepted brand team members can read it; mutations remain owner-only.
 
 export const getTeamWorkspace = async (
   req: Request,
@@ -135,7 +136,20 @@ export const getTeamWorkspace = async (
       return next(err);
     }
 
-    if (!requireOwner(brand.owner_id, userId, next)) return;
+    const canView =
+      brand.owner_id === userId ||
+      brand.branches.some((branch) =>
+        (branch.team?.members ?? []).some(
+          (member) => member.user_id === userId && member.status === 'ACCEPTED',
+        ),
+      );
+
+    if (!canView) {
+      const err: AppError = new Error();
+      err.statusCode = 403;
+      err.messageKey = 'brand.not_owner';
+      return next(err);
+    }
 
     const workspace = {
       brand_id: brand.id,
@@ -175,7 +189,8 @@ export const getTeamWorkspace = async (
 };
 
 // ─── GET /brands/:id/branches/:branchId/team ─────────────────────────────────
-// Returns one branch's team in detail. Owner only.
+// Returns one branch's team in detail. Brand owners and accepted brand team
+// members can read it; mutations remain owner-only.
 
 export const getBranchTeam = async (
   req: Request,
@@ -201,7 +216,25 @@ export const getBranchTeam = async (
       return next(err);
     }
 
-    if (!requireOwner(brand.owner_id, userId, next)) return;
+    const canView =
+      brand.owner_id === userId ||
+      Boolean(
+        await prisma.teamMember.findFirst({
+          where: {
+            user_id: userId,
+            status: 'ACCEPTED',
+            team: { branch: { brand_id: brandId } },
+          },
+          select: { id: true },
+        }),
+      );
+
+    if (!canView) {
+      const err: AppError = new Error();
+      err.statusCode = 403;
+      err.messageKey = 'brand.not_owner';
+      return next(err);
+    }
 
     const branch = await prisma.branch.findUnique({
       where: { id: branchId },

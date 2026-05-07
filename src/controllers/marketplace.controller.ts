@@ -77,8 +77,8 @@ function publicServiceWhere(extra: Record<string, unknown> = {}) {
   const andClauses = [
     {
       OR: [
-        { branch_id: null },
-        { branch: { brand: { status: 'ACTIVE' as const } } },
+        { brand_id: null },
+        { brand: { status: 'ACTIVE' as const } },
       ],
     },
     ...(AND ? (Array.isArray(AND) ? AND : [AND]) : []),
@@ -118,7 +118,7 @@ const homeServiceSelect = {
   title: true,
   description: true,
   owner_id: true,
-  branch_id: true,
+  brand_id: true,
   service_category_id: true,
   service_category: { select: { id: true, key: true } },
   price: true,
@@ -139,20 +139,13 @@ const homeServiceSelect = {
     orderBy: { order: 'asc' as const },
   },
   ratings: { select: { value: true, user_id: true } },
-  branch: {
+  brand: {
     select: {
       id: true,
-      brand_id: true,
       name: true,
-      brand: {
-        select: {
-          id: true,
-          name: true,
-          owner_id: true,
-          logo_media: { select: { storage_path: true } },
-          ratings: { select: { value: true } },
-        },
-      },
+      owner_id: true,
+      logo_media: { select: { storage_path: true } },
+      ratings: { select: { value: true } },
     },
   },
 } as const;
@@ -184,28 +177,21 @@ function mapHomeBrand(raw: any, requesterId?: string) {
 }
 
 function mapHomeService(raw: any, requesterId?: string) {
-  const brandSummary = ratingSummary(raw.branch?.brand?.ratings ?? []);
+  const brandSummary = ratingSummary(raw.brand?.ratings ?? []);
   return {
     id: raw.id,
     title: raw.title,
     description: raw.description ?? undefined,
     owner_id: raw.owner_id,
-    branch_id: raw.branch_id ?? null,
-    branch: raw.branch
+    brand_id: raw.brand_id ?? null,
+    brand: raw.brand
       ? {
-          id: raw.branch.id,
-          brand_id: raw.branch.brand_id,
-          name: raw.branch.name,
-          brand: raw.branch.brand
-            ? {
-                id: raw.branch.brand.id,
-                name: raw.branch.brand.name,
-                owner_id: raw.branch.brand.owner_id,
-                logo_url: imageUrl(raw.branch.brand.logo_media?.storage_path) ?? undefined,
-                rating: brandSummary.rating,
-                rating_count: brandSummary.rating_count,
-              }
-            : null,
+          id: raw.brand.id,
+          name: raw.brand.name,
+          owner_id: raw.brand.owner_id,
+          logo_url: imageUrl(raw.brand.logo_media?.storage_path) ?? undefined,
+          rating: brandSummary.rating,
+          rating_count: brandSummary.rating_count,
         }
       : null,
     service_category_id: raw.service_category_id ?? null,
@@ -236,10 +222,9 @@ async function randomServiceIds(limit: number) {
   return prisma.$queryRaw<{ id: string }[]>`
     SELECT service.id
     FROM "Service" service
-    LEFT JOIN "Branch" branch ON branch.id = service.branch_id
-    LEFT JOIN "Brand" brand ON brand.id = branch.brand_id
+    LEFT JOIN "Brand" brand ON brand.id = service.brand_id
     WHERE service.status = 'ACTIVE'
-      AND (service.branch_id IS NULL OR brand.status = 'ACTIVE')
+      AND (service.brand_id IS NULL OR brand.status = 'ACTIVE')
     ORDER BY RANDOM()
     LIMIT ${limit}
   `;
@@ -319,7 +304,7 @@ export const getMarketplaceHome = async (
                 service: {
                   select: {
                     service_category_id: true,
-                    branch: { select: { brand: { select: { categories: { select: { id: true } } } } } },
+                    brand: { select: { categories: { select: { id: true } } } },
                   },
                 },
               },
@@ -361,7 +346,7 @@ export const getMarketplaceHome = async (
       ...new Set([
         ...favoriteBrands.flatMap((favorite: any) => favorite.brand.categories.map((category: { id: string }) => category.id)),
         ...favoriteServices.flatMap((favorite: any) =>
-          favorite.service.branch?.brand?.categories.map((category: { id: string }) => category.id) ?? [],
+          favorite.service.brand?.categories.map((category: { id: string }) => category.id) ?? [],
         ),
       ]),
     ];

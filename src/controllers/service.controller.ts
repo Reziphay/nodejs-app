@@ -70,27 +70,20 @@ const serviceSelect = {
   title: true,
   description: true,
   owner_id: true,
-  branch_id: true,
+  brand_id: true,
   service_category_id: true,
   service_category: { select: { id: true, key: true } },
-  branch: {
+  brand: {
     select: {
       id: true,
-      brand_id: true,
       name: true,
-      brand: {
+      owner_id: true,
+      status: true,
+      logo_media: { select: { id: true, storage_path: true } },
+      ratings: {
         select: {
-          id: true,
-          name: true,
-          owner_id: true,
-          status: true,
-          logo_media: { select: { id: true, storage_path: true } },
-          ratings: {
-            select: {
-              value: true,
-              user_id: true,
-            },
-          },
+          value: true,
+          user_id: true,
         },
       },
     },
@@ -140,10 +133,10 @@ function mapService(raw: any, requesterId?: string) {
   const isOwner = !!requesterId && raw.owner_id === requesterId;
   const publicRating = isOwner ? ratingAverage : null;
   const publicRatingCount = isOwner ? ratingCount : 0;
-  const brandRatingCount = raw.branch?.brand?.ratings?.length ?? 0;
+  const brandRatingCount = raw.brand?.ratings?.length ?? 0;
   const brandRating =
     brandRatingCount > 0
-      ? roundRating(raw.branch.brand.ratings.reduce((sum: number, rating: { value: number }) => sum + rating.value, 0) / brandRatingCount)
+      ? roundRating(raw.brand.ratings.reduce((sum: number, rating: { value: number }) => sum + rating.value, 0) / brandRatingCount)
       : null;
 
   return {
@@ -151,22 +144,15 @@ function mapService(raw: any, requesterId?: string) {
     title: raw.title,
     description: raw.description ?? undefined,
     owner_id: raw.owner_id,
-    branch_id: raw.branch_id ?? null,
-    branch: raw.branch
+    brand_id: raw.brand_id ?? null,
+    brand: raw.brand
       ? {
-          id: raw.branch.id,
-          brand_id: raw.branch.brand_id,
-          name: raw.branch.name,
-          brand: raw.branch.brand
-            ? {
-                id: raw.branch.brand.id,
-                name: raw.branch.brand.name,
-                owner_id: raw.branch.brand.owner_id,
-                logo_url: raw.branch.brand.logo_media ? buildFileUrl(raw.branch.brand.logo_media.storage_path) : undefined,
-                rating: brandRating,
-                rating_count: brandRatingCount,
-              }
-            : null,
+          id: raw.brand.id,
+          name: raw.brand.name,
+          owner_id: raw.brand.owner_id,
+          logo_url: raw.brand.logo_media ? buildFileUrl(raw.brand.logo_media.storage_path) : undefined,
+          rating: brandRating,
+          rating_count: brandRatingCount,
         }
       : null,
     service_category_id: raw.service_category_id ?? null,
@@ -191,35 +177,30 @@ function mapService(raw: any, requesterId?: string) {
   };
 }
 
-const SIGNIFICANT_FIELDS = ['title', 'description', 'price', 'price_type', 'duration', 'address', 'branch_id', 'service_category_id'] as const;
+const SIGNIFICANT_FIELDS = ['title', 'description', 'price', 'price_type', 'duration', 'address', 'brand_id', 'service_category_id'] as const;
 
-// Verify user can attach a service to the given branch:
-// either as brand owner or as ACCEPTED team member of the branch's team.
-async function validateBranchAccess(
-  branchId: string,
+// Verify user can attach a service to the given brand. Brand-owned services are
+// created by the owner; team members can later request assignment to them.
+async function validateBrandOwnership(
+  brandId: string,
   userId: string,
   next: NextFunction,
 ): Promise<boolean> {
-  const branch = await prisma.branch.findUnique({
-    where: { id: branchId },
-    select: { brand: { select: { owner_id: true } } },
+  const brand = await prisma.brand.findUnique({
+    where: { id: brandId },
+    select: { owner_id: true },
   });
-  if (!branch) {
+  if (!brand) {
     const err: AppError = new Error();
     err.statusCode = 404;
-    err.messageKey = 'service.branch_not_found';
+    err.messageKey = 'brand.not_found';
     next(err);
     return false;
   }
-  if (branch.brand.owner_id === userId) return true;
-
-  const membership = await prisma.teamMember.findFirst({
-    where: { team: { branch_id: branchId }, user_id: userId, status: 'ACCEPTED' },
-  });
-  if (!membership) {
+  if (brand.owner_id !== userId) {
     const err: AppError = new Error();
     err.statusCode = 403;
-    err.messageKey = 'service.not_branch_member';
+    err.messageKey = 'brand.not_owner';
     next(err);
     return false;
   }
@@ -291,9 +272,9 @@ export const createService = async (
     const userId = req.user.sub;
     const body = req.body as CreateServiceInput;
 
-    // Validate branch access if branch_id provided
-    if (body.branch_id) {
-      if (!(await validateBranchAccess(body.branch_id, userId, next))) return;
+    // Validate brand ownership if brand_id provided
+    if (body.brand_id) {
+      if (!(await validateBrandOwnership(body.brand_id, userId, next))) return;
     }
 
     // Validate image media ownership
@@ -305,7 +286,7 @@ export const createService = async (
         title: body.title,
         description: body.description,
         owner_id: userId,
-        branch_id: body.branch_id ?? null,
+        brand_id: body.brand_id ?? null,
         service_category_id: body.service_category_id ?? null,
         price: body.price !== undefined ? body.price : null,
         price_type: body.price_type ?? 'FIXED',
@@ -375,17 +356,24 @@ export const listPublicServices = async (
     const where = {
       status: 'ACTIVE' as const,
       ...(service_category_id && { service_category_id }),
-      ...(branch_id && { branch_id }),
-      ...(brand_id && !branch_id && !direct_only && { branch: { brand_id } }),
+      ...(brand_id && !direct_only && { brand_id }),
       ...(owner_id && { owner_id }),
-      ...(direct_only && { branch_id: null }),
-      // Branch-linked services are only public if their parent brand is ACTIVE.
-      // Direct services (branch_id IS NULL) are unaffected.
+      ...(direct_only && { brand_id: null }),
+      ...(branch_id && {
+        member_assignments: {
+          some: {
+            status: 'ACCEPTED' as const,
+            team_member: { status: 'ACCEPTED' as const, team: { branch_id } },
+          },
+        },
+      }),
+      // Brand-linked services are only public if their parent brand is ACTIVE.
+      // Direct services (brand_id IS NULL) are unaffected.
       AND: [
         {
           OR: [
-            { branch_id: null },
-            { branch: { brand: { status: 'ACTIVE' as const } } },
+            { brand_id: null },
+            { brand: { status: 'ACTIVE' as const } },
           ],
         },
       ],
@@ -457,8 +445,8 @@ export const getServiceById = async (
       return next(err);
     }
 
-    // Branch-linked services with a non-ACTIVE parent brand are hidden from non-owners.
-    if (service.branch && service.branch.brand.status !== 'ACTIVE' && !isOwner) {
+    // Brand-linked services with a non-ACTIVE parent brand are hidden from non-owners.
+    if (service.brand && service.brand.status !== 'ACTIVE' && !isOwner) {
       const err: AppError = new Error();
       err.statusCode = 404;
       err.messageKey = 'service.not_found';
@@ -506,7 +494,7 @@ export const updateService = async (
 
     const existing = await prisma.service.findUnique({
       where: { id },
-      select: { owner_id: true, status: true, branch_id: true, address: true },
+      select: { owner_id: true, status: true, brand_id: true, address: true },
     });
 
     if (!existing) {
@@ -528,14 +516,14 @@ export const updateService = async (
       return next(err);
     }
 
-    // If branch_id is being changed, validate access on the new branch
-    if (body.branch_id !== undefined && body.branch_id !== null) {
-      if (!(await validateBranchAccess(body.branch_id, userId, next))) return;
+    // If brand_id is being changed, validate ownership on the new brand
+    if (body.brand_id !== undefined && body.brand_id !== null) {
+      if (!(await validateBrandOwnership(body.brand_id, userId, next))) return;
     }
 
-    const nextBranchId = body.branch_id !== undefined ? body.branch_id : existing.branch_id;
+    const nextBrandId = body.brand_id !== undefined ? body.brand_id : existing.brand_id;
     const nextAddress = body.address !== undefined ? body.address : existing.address;
-    if (!nextBranchId && !nextAddress?.trim()) {
+    if (!nextBrandId && !nextAddress?.trim()) {
       const err: AppError = new Error();
       err.statusCode = 400;
       err.messageKey = 'service.branch_or_address_required';
@@ -562,7 +550,7 @@ export const updateService = async (
       data: {
         ...(body.title !== undefined && { title: body.title }),
         ...(body.description !== undefined && { description: body.description }),
-        ...(body.branch_id !== undefined && { branch_id: body.branch_id }),
+        ...(body.brand_id !== undefined && { brand_id: body.brand_id }),
         ...(body.service_category_id !== undefined && { service_category_id: body.service_category_id }),
         ...(body.price !== undefined && { price: body.price }),
         ...(body.price_type !== undefined && { price_type: body.price_type }),
@@ -642,7 +630,7 @@ export const submitService = async (
 
     const existing = await prisma.service.findUnique({
       where: { id },
-      select: { owner_id: true, status: true, branch_id: true },
+      select: { owner_id: true, status: true },
     });
 
     if (!existing) {
@@ -663,11 +651,6 @@ export const submitService = async (
       err.statusCode = 400;
       err.messageKey = 'service.cannot_submit_in_current_status';
       return next(err);
-    }
-
-    // Re-validate branch access at submit time (membership may have changed)
-    if (existing.branch_id) {
-      if (!(await validateBranchAccess(existing.branch_id, userId, next))) return;
     }
 
     const service = await prisma.service.update({
