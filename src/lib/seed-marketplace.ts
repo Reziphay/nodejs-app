@@ -606,7 +606,7 @@ async function seedUser(
         title: svcDef.title,
         description: svcDef.description,
         owner_id: userId,
-        branch_id: branchId,
+        brand_id: branchId ? (brandId ?? null) : null,
         service_category_id: catId,
         price: svcDef.price ?? null,
         price_type: svcDef.price_type,
@@ -634,9 +634,9 @@ async function seedUser(
 
   console.log(
     `  ✓ ${userDef.first_name} ${userDef.last_name}` +
-      (userDef.has_brand ? ` → ${userDef.brand_name}` : ' → direct-only owner') +
-      ` | ${userDef.branches.length} branches | ${userDef.services.length} brand services` +
-      ` | ${userDef.direct_services.length} direct services`,
+    (userDef.has_brand ? ` → ${userDef.brand_name}` : ' → direct-only owner') +
+    ` | ${userDef.branches.length} branches | ${userDef.services.length} brand services` +
+    ` | ${userDef.direct_services.length} direct services`,
   );
 
   return { userId, brandId, serviceIds };
@@ -765,9 +765,9 @@ async function main(): Promise<void> {
 
   console.log(
     `\nDone. Created ${totals.users} users, ${totals.brands} brands,` +
-      ` ${totals.branches} branches, ${totals.brandServices} brand services,` +
-      ` ${totals.directServices} direct user services, ${totals.brandRatings} brand ratings,` +
-      ` ${totals.serviceRatings} service ratings.`,
+    ` ${totals.branches} branches, ${totals.brandServices} brand services,` +
+    ` ${totals.directServices} direct user services, ${totals.brandRatings} brand ratings,` +
+    ` ${totals.serviceRatings} service ratings.`,
   );
 }
 
