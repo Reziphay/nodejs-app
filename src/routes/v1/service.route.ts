@@ -18,6 +18,7 @@ import {
 } from '../../controllers/service.controller';
 import { authenticate } from '../../middlewares/auth.middleware';
 import { validate } from '../../middlewares/validate.middleware';
+import { requireVerifiedAccount } from '../../middlewares/require-verified.middleware';
 import { AppError } from '../../middlewares/error.middleware';
 import {
   createServiceSchema,
@@ -54,7 +55,7 @@ router.get('/services', listPublicServices);
 // ─── Authenticated routes ──────────────────────────────────────────────────────
 
 router.get('/services/mine', authenticate, getMyServices);
-router.post('/services', authenticate, validate(createServiceSchema), createService);
+router.post('/services', authenticate, requireVerifiedAccount, validate(createServiceSchema), createService);
 router.get('/services/:id', authenticate, getServiceById);
 router.patch('/services/:id', authenticate, validate(updateServiceSchema), updateService);
 router.delete('/services/:id', authenticate, deleteService);

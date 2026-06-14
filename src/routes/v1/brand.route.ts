@@ -22,6 +22,7 @@ import {
 import { uploadBrandMedia } from '../../controllers/media.controller';
 import { authenticate } from '../../middlewares/auth.middleware';
 import { validate } from '../../middlewares/validate.middleware';
+import { requireVerifiedAccount } from '../../middlewares/require-verified.middleware';
 import { AppError } from '../../middlewares/error.middleware';
 import {
   createBrandSchema,
@@ -196,7 +197,7 @@ router.get('/brands/mine', authenticate, getMyBrands);
  *       403:
  *         description: Forbidden
  */
-router.post('/brands', authenticate, validate(createBrandSchema), createBrand);
+router.post('/brands', authenticate, requireVerifiedAccount, validate(createBrandSchema), createBrand);
 
 /**
  * @openapi
