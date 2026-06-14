@@ -122,7 +122,6 @@ model User {
   moderation_reviews ModerationReview[]          @relation("ModerationReviewer")
   reservations_as_provider Reservation[]         @relation("ReservationProvider")
   reservations_as_customer Reservation[]         @relation("ReservationCustomer")
-  provider_dayoffs         ProviderDayOff[]      @relation("ProviderDayOffUser")
 
   avatar_media Media? @relation("UserAvatar", fields: [avatar_media_id], references: [id], onDelete: SetNull)
 
@@ -613,14 +612,3 @@ model ServiceSchedule {
   @@index([service_id, weekday])
 }
 
-// Days a provider is fully unavailable (vacation, holiday, time off).
-model ProviderDayOff {
-  id               String   @id @default(cuid())
-  provider_user_id String
-  date             DateTime @db.Date
-
-  provider User @relation("ProviderDayOffUser", fields: [provider_user_id], references: [id], onDelete: Cascade)
-
-  @@unique([provider_user_id, date])
-  @@index([provider_user_id])
-}

@@ -10,23 +10,14 @@ import {
   completeReservation,
   markNoShow,
 } from '../../controllers/reservation.controller';
-import {
-  getMyAvailability,
-  setMyDayOffs,
-} from '../../controllers/provider-availability.controller';
 import { authenticate } from '../../middlewares/auth.middleware';
 import { validate } from '../../middlewares/validate.middleware';
 import {
   createReservationSchema,
   cancelReservationSchema,
-  setProviderDayOffSchema,
 } from '../../schemas/reservation.schema';
 
 const router: Router = Router();
-
-// ─── Provider day-offs / vacation (USO) ──────────────────────────────────────
-router.get('/availability/me', authenticate, getMyAvailability);
-router.put('/availability/me/dayoffs', authenticate, validate(setProviderDayOffSchema), setMyDayOffs);
 
 // ─── Public slot availability ────────────────────────────────────────────────
 router.get('/availability', authenticate, getAvailability);

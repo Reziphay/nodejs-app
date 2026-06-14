@@ -29,11 +29,3 @@ export const availabilityQuerySchema = z.object({
 });
 
 export type AvailabilityQueryInput = z.infer<typeof availabilityQuerySchema>;
-
-// ─── Provider day-off management ─────────────────────────────────────────────
-
-export const setProviderDayOffSchema = z.object({
-  dates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be YYYY-MM-DD')).max(60),
-});
-
-export type SetProviderDayOffInput = z.infer<typeof setProviderDayOffSchema>;

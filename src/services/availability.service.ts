@@ -115,11 +115,7 @@ export async function computeSlots(args: ComputeArgs): Promise<Slot[]> {
   const weekday = new Date(`${date}T00:00:00.000Z`).getUTCDay();
   const dayStart = new Date(`${date}T00:00:00.000Z`);
 
-  const [dayOff, branch, reservations] = await Promise.all([
-    prisma.providerDayOff.findUnique({
-      where: { provider_user_id_date: { provider_user_id: providerUserId, date: dayStart } },
-      select: { id: true },
-    }),
+  const [branch, reservations] = await Promise.all([
     service.hours_source === 'BRANCH' && service.branch_id
       ? prisma.branch.findUnique({
           where: { id: service.branch_id },
@@ -135,8 +131,6 @@ export async function computeSlots(args: ComputeArgs): Promise<Slot[]> {
       select: { starts_at: true, ends_at: true },
     }),
   ]);
-
-  if (dayOff) return [];
 
   // Derive working windows for this weekday from the service's hours.
   let windows: Interval[] = [];
