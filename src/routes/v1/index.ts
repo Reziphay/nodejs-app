@@ -11,6 +11,7 @@ import moderationRoute from './moderation.route';
 import marketplaceRoute from './marketplace.route';
 import favoriteRoute from './favorite.route';
 import teamServiceAssignmentRoute from './team-service-assignment.route';
+import reservationRoute from './reservation.route';
 
 const router: Router = Router();
 
@@ -26,5 +27,6 @@ router.use('/', teamServiceAssignmentRoute);
 router.use('/', moderationRoute);
 router.use('/', marketplaceRoute);
 router.use('/', favoriteRoute);
+router.use('/', reservationRoute);
 
 export default router;

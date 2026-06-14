@@ -601,12 +601,20 @@ async function seedUser(
       720,
     );
 
+    // Brand services inherit the linked branch's opening hours; direct
+    // (individual) services get a custom Mon–Fri 09:00–18:00 weekly schedule
+    // so they are bookable out of the box.
+    const isBrandService = Boolean(branchId);
+    const customWeekdays = [1, 2, 3, 4, 5]; // Mon–Fri
+
     const service = await prisma.service.create({
       data: {
         title: svcDef.title,
         description: svcDef.description,
         owner_id: userId,
-        brand_id: branchId ? (brandId ?? null) : null,
+        brand_id: isBrandService ? (brandId ?? null) : null,
+        branch_id: isBrandService ? branchId : null,
+        hours_source: isBrandService ? 'BRANCH' : 'CUSTOM',
         service_category_id: catId,
         price: svcDef.price ?? null,
         price_type: svcDef.price_type,
@@ -614,6 +622,9 @@ async function seedUser(
         address: branchId ? null : (userDef.branches[index % userDef.branches.length]?.address1 ?? BAKU_BRANCHES[index % BAKU_BRANCHES.length].address1),
         status: 'ACTIVE',
         images: { create: [{ media_id: imgMediaId, order: 0 }] },
+        schedules: isBrandService
+          ? undefined
+          : { create: customWeekdays.map((weekday) => ({ weekday, start_min: 540, end_min: 1080 })) },
       },
       select: { id: true },
     });

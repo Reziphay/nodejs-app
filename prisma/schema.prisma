@@ -120,6 +120,9 @@ model User {
   feed_dismissals    NotificationFeedDismissal[]
   feed_state         NotificationFeedState?
   moderation_reviews ModerationReview[]          @relation("ModerationReviewer")
+  reservations_as_provider Reservation[]         @relation("ReservationProvider")
+  reservations_as_customer Reservation[]         @relation("ReservationCustomer")
+  provider_dayoffs         ProviderDayOff[]      @relation("ProviderDayOffUser")
 
   avatar_media Media? @relation("UserAvatar", fields: [avatar_media_id], references: [id], onDelete: SetNull)
 
@@ -242,10 +245,12 @@ model Branch {
   created_at     DateTime @default(now())
   updated_at     DateTime @updatedAt
 
-  brand       Brand         @relation(fields: [brand_id], references: [id], onDelete: Cascade)
-  breaks      BranchBreak[]
-  team        Team?         @relation("BranchTeam")
-  cover_media Media?        @relation("BranchCover", fields: [cover_media_id], references: [id], onDelete: SetNull)
+  brand         Brand              @relation(fields: [brand_id], references: [id], onDelete: Cascade)
+  breaks        BranchBreak[]
+  team          Team?              @relation("BranchTeam")
+  cover_media   Media?             @relation("BranchCover", fields: [cover_media_id], references: [id], onDelete: SetNull)
+  reservations  Reservation[]
+  services      Service[]          @relation("ServiceBranch")
 
   @@index([brand_id])
 }
@@ -409,10 +414,15 @@ model Service {
   description         String?
   owner_id            String
   brand_id            String?
+  branch_id           String?
   service_category_id String?
   price               Decimal?      @db.Decimal(10, 2)
   price_type          PriceType     @default(FIXED)
   duration            Int?
+  buffer_min          Int           @default(0)
+  // Where bookable hours come from. CUSTOM → ServiceSchedule rows; BRANCH →
+  // the linked branch's opening hours (brand services only).
+  hours_source        HoursSource   @default(CUSTOM)
   address             String?
   status              ServiceStatus @default(DRAFT)
   rejection_reason    String?
@@ -421,16 +431,25 @@ model Service {
 
   owner              User                          @relation(fields: [owner_id], references: [id], onDelete: Cascade)
   brand              Brand?                        @relation(fields: [brand_id], references: [id], onDelete: SetNull)
+  branch             Branch?                       @relation("ServiceBranch", fields: [branch_id], references: [id], onDelete: SetNull)
   service_category   ServiceCategory?              @relation(fields: [service_category_id], references: [id], onDelete: SetNull)
   images             ServiceMedia[]
   ratings            ServiceRating[]
   favorites          FavoriteService[]
   member_assignments TeamMemberServiceAssignment[]
+  reservations       Reservation[]
+  schedules          ServiceSchedule[]
 
   @@index([owner_id])
   @@index([brand_id])
+  @@index([branch_id])
   @@index([status])
   @@index([service_category_id])
+}
+
+enum HoursSource {
+  CUSTOM
+  BRANCH
 }
 
 model ServiceRating {
@@ -532,4 +551,76 @@ model ModerationReview {
 
   @@index([entity_type, entity_id])
   @@index([reviewer_id])
+}
+
+// ─── Reservation ─────────────────────────────────────────────────────────────
+
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED_BY_UCR
+  CANCELLED_BY_USO
+  COMPLETED
+  NO_SHOW
+}
+
+// A UCR's booking of a service for a concrete time window with a concrete
+// provider (USO). provider_user_id is the actual person performing the service,
+// resolved from the service owner or an accepted TeamMemberServiceAssignment.
+model Reservation {
+  id               String            @id @default(cuid())
+  service_id       String
+  provider_user_id String
+  ucr_id           String
+  branch_id        String?
+
+  starts_at        DateTime
+  ends_at          DateTime
+  status           ReservationStatus @default(PENDING)
+
+  price_snapshot   Decimal?          @db.Decimal(10, 2)
+  currency         String            @default("AZN")
+  cancel_reason    String?
+  responded_at     DateTime?
+
+  created_at       DateTime          @default(now())
+  updated_at       DateTime          @updatedAt
+
+  service  Service @relation(fields: [service_id], references: [id], onDelete: Cascade)
+  provider User    @relation("ReservationProvider", fields: [provider_user_id], references: [id], onDelete: Cascade)
+  ucr      User    @relation("ReservationCustomer", fields: [ucr_id], references: [id], onDelete: Cascade)
+  branch   Branch? @relation(fields: [branch_id], references: [id], onDelete: SetNull)
+
+  @@unique([provider_user_id, starts_at])
+  @@index([provider_user_id, starts_at])
+  @@index([ucr_id, starts_at])
+  @@index([service_id])
+  @@index([status])
+}
+
+// A service's weekly recurring bookable windows (used when hours_source =
+// CUSTOM). Slot availability is computed within these windows, minus the
+// provider's day-offs and existing reservations.
+model ServiceSchedule {
+  id         String @id @default(cuid())
+  service_id String
+  weekday    Int // 0 = Sunday … 6 = Saturday
+  start_min  Int // minutes from midnight, 0–1439
+  end_min    Int
+
+  service Service @relation(fields: [service_id], references: [id], onDelete: Cascade)
+
+  @@index([service_id, weekday])
+}
+
+// Days a provider is fully unavailable (vacation, holiday, time off).
+model ProviderDayOff {
+  id               String   @id @default(cuid())
+  provider_user_id String
+  date             DateTime @db.Date
+
+  provider User @relation("ProviderDayOffUser", fields: [provider_user_id], references: [id], onDelete: Cascade)
+
+  @@unique([provider_user_id, date])
+  @@index([provider_user_id])
 }

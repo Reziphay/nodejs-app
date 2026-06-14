@@ -71,6 +71,9 @@ const serviceSelect = {
   description: true,
   owner_id: true,
   brand_id: true,
+  branch_id: true,
+  hours_source: true,
+  schedules: { select: { weekday: true, start_min: true, end_min: true } },
   service_category_id: true,
   service_category: { select: { id: true, key: true } },
   brand: {
@@ -155,6 +158,13 @@ function mapService(raw: any, requesterId?: string) {
           rating_count: brandRatingCount,
         }
       : null,
+    branch_id: raw.branch_id ?? null,
+    hours_source: raw.hours_source ?? 'CUSTOM',
+    schedule: (raw.schedules ?? []).map((s: { weekday: number; start_min: number; end_min: number }) => ({
+      weekday: s.weekday,
+      start_min: s.start_min,
+      end_min: s.end_min,
+    })),
     service_category_id: raw.service_category_id ?? null,
     service_category: raw.service_category ?? null,
     price: raw.price ? Number(raw.price) : null,
@@ -281,12 +291,17 @@ export const createService = async (
     const imageIds = body.image_media_ids ?? [];
     if (!(await validateMediaOwnership(imageIds, userId, next))) return;
 
+    const hoursSource = body.hours_source ?? 'CUSTOM';
+    const scheduleRows = hoursSource === 'CUSTOM' ? body.schedule ?? [] : [];
+
     const service = await prisma.service.create({
       data: {
         title: body.title,
         description: body.description,
         owner_id: userId,
         brand_id: body.brand_id ?? null,
+        branch_id: body.branch_id ?? null,
+        hours_source: hoursSource,
         service_category_id: body.service_category_id ?? null,
         price: body.price !== undefined ? body.price : null,
         price_type: body.price_type ?? 'FIXED',
@@ -299,6 +314,16 @@ export const createService = async (
                 create: imageIds.map((mediaId, index) => ({
                   media_id: mediaId,
                   order: index,
+                })),
+              }
+            : undefined,
+        schedules:
+          scheduleRows.length > 0
+            ? {
+                create: scheduleRows.map((w) => ({
+                  weekday: w.weekday,
+                  start_min: w.start_min,
+                  end_min: w.end_min,
                 })),
               }
             : undefined,
@@ -545,12 +570,19 @@ export const updateService = async (
       await prisma.serviceMedia.deleteMany({ where: { service_id: id } });
     }
 
+    // Replace working-hours windows when a schedule is provided.
+    if (body.schedule !== undefined) {
+      await prisma.serviceSchedule.deleteMany({ where: { service_id: id } });
+    }
+
     const service = await prisma.service.update({
       where: { id },
       data: {
         ...(body.title !== undefined && { title: body.title }),
         ...(body.description !== undefined && { description: body.description }),
         ...(body.brand_id !== undefined && { brand_id: body.brand_id }),
+        ...(body.branch_id !== undefined && { branch_id: body.branch_id }),
+        ...(body.hours_source !== undefined && { hours_source: body.hours_source }),
         ...(body.service_category_id !== undefined && { service_category_id: body.service_category_id }),
         ...(body.price !== undefined && { price: body.price }),
         ...(body.price_type !== undefined && { price_type: body.price_type }),
@@ -561,6 +593,16 @@ export const updateService = async (
           imageIds.length > 0 && {
             images: {
               create: imageIds.map((mediaId, index) => ({ media_id: mediaId, order: index })),
+            },
+          }),
+        ...(body.schedule !== undefined &&
+          body.schedule.length > 0 && {
+            schedules: {
+              create: body.schedule.map((w) => ({
+                weekday: w.weekday,
+                start_min: w.start_min,
+                end_min: w.end_min,
+              })),
             },
           }),
       },
