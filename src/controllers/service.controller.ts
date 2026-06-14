@@ -285,6 +285,17 @@ export const createService = async (
     // Validate brand ownership if brand_id provided
     if (body.brand_id) {
       if (!(await validateBrandOwnership(body.brand_id, userId, next))) return;
+      // Services can only be added to an ACTIVE (approved) brand.
+      const brand = await prisma.brand.findUnique({
+        where: { id: body.brand_id },
+        select: { status: true },
+      });
+      if (brand && brand.status !== 'ACTIVE') {
+        const err: AppError = new Error();
+        err.statusCode = 400;
+        err.messageKey = 'brand.not_active';
+        return next(err);
+      }
     }
 
     // Validate image media ownership
