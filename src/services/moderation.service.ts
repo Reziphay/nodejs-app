@@ -203,6 +203,14 @@ export async function getBrandModerationDetail(brandId: string) {
     description: brand.description ?? undefined,
     status: brand.status,
     rejection_reason: (brand as { rejection_reason?: string | null }).rejection_reason ?? undefined,
+    // Social/website links — admin must see these to review for malicious content.
+    instagram_url: brand.instagram_url ?? null,
+    facebook_url: brand.facebook_url ?? null,
+    youtube_url: brand.youtube_url ?? null,
+    whatsapp_url: brand.whatsapp_url ?? null,
+    linkedin_url: brand.linkedin_url ?? null,
+    x_url: brand.x_url ?? null,
+    website_url: brand.website_url ?? null,
     owner: {
       ...brand.owner,
       avatar_url: brand.owner.avatar_media ? buildFileUrl(brand.owner.avatar_media.storage_path) : null,
