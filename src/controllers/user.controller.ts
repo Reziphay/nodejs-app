@@ -35,6 +35,13 @@ const privateUserSelect = {
   type: true,
   phone_verified: true,
   email_verified: true,
+  instagram_url: true,
+  facebook_url: true,
+  youtube_url: true,
+  whatsapp_url: true,
+  linkedin_url: true,
+  x_url: true,
+  website_url: true,
   avatar_media: { select: { storage_path: true } },
   created_at: true,
   updated_at: true,
@@ -57,6 +64,13 @@ export const getUserById = async (
         last_name: true,
         email: true,
         type: true,
+        instagram_url: true,
+        facebook_url: true,
+        youtube_url: true,
+        whatsapp_url: true,
+        linkedin_url: true,
+        x_url: true,
+        website_url: true,
         avatar_media: { select: { storage_path: true } },
         created_at: true,
         updated_at: true,
@@ -70,7 +84,7 @@ export const getUserById = async (
       return next(err);
     }
 
-    const { avatar_media, ...rest } = user;
+    const { avatar_media, instagram_url, facebook_url, youtube_url, whatsapp_url, linkedin_url, x_url, website_url, ...rest } = user;
 
     sendSuccess({
       res,
@@ -80,6 +94,13 @@ export const getUserById = async (
         user: {
           ...rest,
           avatar_url: resolveAvatarUrl(avatar_media?.storage_path),
+          ...(instagram_url && { instagram_url }),
+          ...(facebook_url && { facebook_url }),
+          ...(youtube_url && { youtube_url }),
+          ...(whatsapp_url && { whatsapp_url }),
+          ...(linkedin_url && { linkedin_url }),
+          ...(x_url && { x_url }),
+          ...(website_url && { website_url }),
         },
       },
     });
@@ -169,6 +190,13 @@ export const updateMe = async (
         phone: newPhone,
         ...(emailChanged && { email_verified: false }),
         ...(phoneChanged && { phone_verified: false }),
+        ...(body.instagram_url !== undefined && { instagram_url: body.instagram_url }),
+        ...(body.facebook_url !== undefined && { facebook_url: body.facebook_url }),
+        ...(body.youtube_url !== undefined && { youtube_url: body.youtube_url }),
+        ...(body.whatsapp_url !== undefined && { whatsapp_url: body.whatsapp_url }),
+        ...(body.linkedin_url !== undefined && { linkedin_url: body.linkedin_url }),
+        ...(body.x_url !== undefined && { x_url: body.x_url }),
+        ...(body.website_url !== undefined && { website_url: body.website_url }),
       },
       select: privateUserSelect,
     });

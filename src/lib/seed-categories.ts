@@ -1,35 +1,55 @@
 import prisma from './prisma';
 
-const BRAND_CATEGORIES = [
-  'Food & Beverage',
-  'Beauty & Wellness',
-  'Fitness & Sports',
-  'Fashion & Apparel',
-  'Technology & Electronics',
-  'Home & Furniture',
-  'Health & Pharmacy',
-  'Education & Training',
-  'Entertainment & Media',
-  'Travel & Hospitality',
+const BRAND_CATEGORY_KEYS = [
+  'food_beverage',
+  'beauty_wellness',
+  'fitness_sports',
+  'fashion_apparel',
+  'technology_electronics',
+  'home_furniture',
+  'health_pharmacy',
+  'education_training',
+  'entertainment_media',
+  'travel_hospitality',
+];
+
+const SERVICE_CATEGORY_KEYS = [
+  'haircut_styling',
+  'massage_therapy',
+  'personal_training',
+  'nail_care',
+  'facial_treatment',
+  'dental_care',
+  'consulting',
+  'photo_session',
 ];
 
 export async function seedBrandCategories(): Promise<void> {
   console.log('Seeding brand categories...');
-
-  for (const name of BRAND_CATEGORIES) {
+  for (const key of BRAND_CATEGORY_KEYS) {
     await prisma.brandCategory.upsert({
-      where: { name },
+      where: { key },
       update: {},
-      create: { name },
+      create: { key },
     });
   }
-
-  console.log(`Seeded ${BRAND_CATEGORIES.length} brand categories.`);
+  console.log(`Seeded ${BRAND_CATEGORY_KEYS.length} brand categories.`);
 }
 
-// Allow running directly: npx ts-node src/lib/seed-categories.ts
+export async function seedServiceCategories(): Promise<void> {
+  console.log('Seeding service categories...');
+  for (const key of SERVICE_CATEGORY_KEYS) {
+    await prisma.serviceCategory.upsert({
+      where: { key },
+      update: {},
+      create: { key },
+    });
+  }
+  console.log(`Seeded ${SERVICE_CATEGORY_KEYS.length} service categories.`);
+}
+
 if (require.main === module) {
-  seedBrandCategories()
+  Promise.all([seedBrandCategories(), seedServiceCategories()])
     .catch((err) => {
       console.error(err);
       process.exit(1);
