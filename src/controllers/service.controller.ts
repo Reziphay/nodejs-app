@@ -153,6 +153,7 @@ function mapService(raw: any, requesterId?: string) {
           id: raw.brand.id,
           name: raw.brand.name,
           owner_id: raw.brand.owner_id,
+          status: raw.brand.status,
           logo_url: raw.brand.logo_media ? buildFileUrl(raw.brand.logo_media.storage_path) : undefined,
           rating: brandRating,
           rating_count: brandRatingCount,

@@ -3,7 +3,6 @@ import prisma from '../lib/prisma';
 import { sendSuccess } from '../utils/response';
 import { AppError } from '../middlewares/error.middleware';
 import { buildFileUrl } from '../services/storage.service';
-import { suspendBrandServices } from '../lib/brand-lifecycle';
 import type {
   CreateBrandInput,
   UpdateBrandInput,
@@ -611,6 +610,18 @@ export const getBrandById = async (
       }
     }
 
+    // Owner-only: count upcoming active reservations across the brand's services
+    // so the edit page can warn that editing (→ re-review) hides services.
+    const active_reservations_count = isOwner
+      ? await prisma.reservation.count({
+          where: {
+            service: { brand_id: brand.id },
+            status: { in: ['PENDING', 'CONFIRMED'] },
+            starts_at: { gte: new Date() },
+          },
+        })
+      : 0;
+
     sendSuccess({
       res,
       status: 200,
@@ -621,6 +632,7 @@ export const getBrandById = async (
           branches: brand.branches.map((b) => mapBranch(b as BranchRaw)),
           viewer_role,
           viewer_branch_id,
+          active_reservations_count,
         },
       },
     });
@@ -711,12 +723,6 @@ export const updateBrand = async (
       },
       select: brandSelect,
     });
-
-    // Brand left ACTIVE for re-review → pause its services + cancel upcoming
-    // reservations so it is no longer publicly bookable while pending.
-    if (shouldResetToPending && existing.status === 'ACTIVE') {
-      await suspendBrandServices(id);
-    }
 
     sendSuccess({ res, status: 200, message: 'brand.updated', data: { brand: mapBrand(brand as BrandRaw, userId) } });
   } catch (err) {
