@@ -608,6 +608,9 @@ model Reservation {
   price_snapshot   Decimal?          @db.Decimal(10, 2)
   currency         String            @default("AZN")
   cancel_reason    String?
+  // 6-digit code generated when the USO confirms the request. Shown only to the
+  // UCR; the USO must enter it to complete the service (anti-fraud).
+  confirmation_code String?
   responded_at     DateTime?
 
   created_at       DateTime          @default(now())

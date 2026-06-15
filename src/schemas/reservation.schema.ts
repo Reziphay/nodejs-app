@@ -22,6 +22,13 @@ export const cancelReservationSchema = z.object({
 
 export type CancelReservationInput = z.infer<typeof cancelReservationSchema>;
 
+// Completing a reservation requires the 6-digit confirmation code the UCR holds.
+export const completeReservationSchema = z.object({
+  confirmation_code: z.string().regex(/^\d{6}$/, 'confirmation_code must be 6 digits'),
+});
+
+export type CompleteReservationInput = z.infer<typeof completeReservationSchema>;
+
 // ─── Rating ──────────────────────────────────────────────────────────────────
 
 export const rateUserSchema = z.object({

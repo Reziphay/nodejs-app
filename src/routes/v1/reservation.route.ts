@@ -17,6 +17,7 @@ import { validate } from '../../middlewares/validate.middleware';
 import {
   createReservationSchema,
   cancelReservationSchema,
+  completeReservationSchema,
   rateUserSchema,
 } from '../../schemas/reservation.schema';
 
@@ -34,7 +35,7 @@ router.get('/reservations/:id', authenticate, getReservationById);
 router.post('/reservations/:id/confirm', authenticate, confirmReservation);
 router.post('/reservations/:id/cancel', authenticate, validate(cancelReservationSchema), cancelByUcr);
 router.post('/reservations/:id/reject', authenticate, validate(cancelReservationSchema), cancelByUso);
-router.post('/reservations/:id/complete', authenticate, completeReservation);
+router.post('/reservations/:id/complete', authenticate, validate(completeReservationSchema), completeReservation);
 router.post('/reservations/:id/no-show', authenticate, markNoShow);
 
 // ─── User-to-user ratings (gated by completed reservations) ──────────────────

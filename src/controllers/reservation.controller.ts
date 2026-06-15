@@ -8,6 +8,7 @@ import {
   availabilityQuerySchema,
   type CreateReservationInput,
   type CancelReservationInput,
+  type CompleteReservationInput,
   type RateUserInput,
 } from '../schemas/reservation.schema';
 
@@ -62,6 +63,20 @@ export async function ucrHasCompletedReservation(
     select: { id: true },
   });
   return Boolean(found);
+}
+
+// Generate a 6-digit code not currently used by another CONFIRMED reservation.
+// Codes are free to reuse once a reservation leaves the CONFIRMED state.
+async function generateConfirmationCode(): Promise<string> {
+  for (let i = 0; i < 12; i++) {
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    const clash = await prisma.reservation.findFirst({
+      where: { confirmation_code: code, status: 'CONFIRMED' },
+      select: { id: true },
+    });
+    if (!clash) return code;
+  }
+  return String(Math.floor(100000 + Math.random() * 900000));
 }
 
 // ─── Availability ──────────────────────────────────────────────────────────────
@@ -223,7 +238,12 @@ export const listMyReservations = async (
       },
     });
 
-    sendSuccess({ res, status: 200, message: 'reservation.list_ok', data: reservations });
+    // The confirmation code is the UCR's secret — never expose it to the provider.
+    const redacted = reservations.map((r) =>
+      r.ucr_id === req.user.sub ? r : { ...r, confirmation_code: null },
+    );
+
+    sendSuccess({ res, status: 200, message: 'reservation.list_ok', data: redacted });
   } catch (err) {
     next(err);
   }
@@ -247,7 +267,13 @@ export const getReservationById = async (
     if (reservation.ucr_id !== req.user.sub && reservation.provider_user_id !== req.user.sub)
       return void fail(next, 403, 'errors.forbidden');
 
-    sendSuccess({ res, status: 200, message: 'reservation.get_ok', data: reservation });
+    // The confirmation code is the UCR's secret — never expose it to the provider.
+    const safe =
+      reservation.ucr_id === req.user.sub
+        ? reservation
+        : { ...reservation, confirmation_code: null };
+
+    sendSuccess({ res, status: 200, message: 'reservation.get_ok', data: safe });
   } catch (err) {
     next(err);
   }
@@ -281,17 +307,27 @@ export const confirmReservation = async (
     if (r.provider_user_id !== req.user.sub) return void fail(next, 403, 'errors.forbidden');
     if (r.status !== 'PENDING') return void fail(next, 400, 'reservation.invalid_transition');
 
+    const svc = await prisma.service.findUnique({ where: { id: r.service_id }, select: { title: true } });
+    const confirmationCode = await generateConfirmationCode();
     const updated = await prisma.reservation.update({
       where: { id: r.id },
-      data: { status: 'CONFIRMED', responded_at: new Date() },
+      data: { status: 'CONFIRMED', responded_at: new Date(), confirmation_code: confirmationCode },
     });
     await emitNotification({
       user_id: r.ucr_id,
       type: 'reservation_confirmed',
-      data: { reservation_id: r.id, service_id: r.service_id, starts_at: r.starts_at.toISOString() },
+      data: {
+        reservation_id: r.id,
+        service_id: r.service_id,
+        service_title: svc?.title ?? null,
+        starts_at: r.starts_at.toISOString(),
+        confirmation_code: confirmationCode,
+      },
       fallback_title: 'Reservation confirmed',
+      fallback_body: `Confirmation code: ${confirmationCode}`,
     });
-    sendSuccess({ res, status: 200, message: 'reservation.confirmed', data: updated });
+    // Confirm response goes to the USO — strip the code (only the UCR may see it).
+    sendSuccess({ res, status: 200, message: 'reservation.confirmed', data: { ...updated, confirmation_code: null } });
   } catch (err) {
     next(err);
   }
@@ -394,6 +430,12 @@ export const completeReservation = async (
     if (!r) return;
     if (r.provider_user_id !== req.user.sub) return void fail(next, 403, 'errors.forbidden');
     if (r.status !== 'CONFIRMED') return void fail(next, 400, 'reservation.invalid_transition');
+
+    // The USO must enter the 6-digit code the UCR holds. Prevents completing a
+    // service without the customer's confirmation.
+    const { confirmation_code } = req.body as CompleteReservationInput;
+    if (!r.confirmation_code || confirmation_code !== r.confirmation_code)
+      return void fail(next, 400, 'reservation.invalid_code');
 
     const updated = await prisma.reservation.update({
       where: { id: r.id },
