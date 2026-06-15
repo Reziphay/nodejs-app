@@ -103,10 +103,13 @@ export async function computeSlots(args: ComputeArgs): Promise<Slot[]> {
       status: true,
       hours_source: true,
       branch_id: true,
+      brand: { select: { status: true } },
       schedules: { select: { weekday: true, start_min: true, end_min: true } },
     },
   });
   if (!service || service.status !== 'ACTIVE') return [];
+  // Brand-linked services are only bookable while the parent brand is ACTIVE.
+  if (service.brand && service.brand.status !== 'ACTIVE') return [];
 
   const duration = service.duration ?? 0;
   if (duration <= 0) return [];

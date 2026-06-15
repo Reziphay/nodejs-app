@@ -3,6 +3,7 @@ import prisma from '../lib/prisma';
 import { sendSuccess } from '../utils/response';
 import { AppError } from '../middlewares/error.middleware';
 import { buildFileUrl } from '../services/storage.service';
+import { suspendBrandServices } from '../lib/brand-lifecycle';
 import type {
   CreateBrandInput,
   UpdateBrandInput,
@@ -710,6 +711,12 @@ export const updateBrand = async (
       },
       select: brandSelect,
     });
+
+    // Brand left ACTIVE for re-review → pause its services + cancel upcoming
+    // reservations so it is no longer publicly bookable while pending.
+    if (shouldResetToPending && existing.status === 'ACTIVE') {
+      await suspendBrandServices(id);
+    }
 
     sendSuccess({ res, status: 200, message: 'brand.updated', data: { brand: mapBrand(brand as BrandRaw, userId) } });
   } catch (err) {

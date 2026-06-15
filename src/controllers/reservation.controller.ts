@@ -99,10 +99,12 @@ export const createReservation = async (
 
     const service = await prisma.service.findUnique({
       where: { id: body.service_id },
-      select: { id: true, duration: true, price: true, status: true, title: true },
+      select: { id: true, duration: true, price: true, status: true, title: true, brand: { select: { status: true } } },
     });
     if (!service) return void fail(next, 404, 'reservation.service_not_found');
     if (service.status !== 'ACTIVE') return void fail(next, 400, 'reservation.service_not_active');
+    if (service.brand && service.brand.status !== 'ACTIVE')
+      return void fail(next, 400, 'reservation.service_not_active');
     if (!service.duration || service.duration <= 0)
       return void fail(next, 400, 'reservation.service_no_duration');
 
