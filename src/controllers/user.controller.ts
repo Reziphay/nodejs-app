@@ -4,6 +4,7 @@ import { sendSuccess } from '../utils/response';
 import { AppError } from '../middlewares/error.middleware';
 import { UpdateMeInput } from '../schemas/user.schema';
 import { buildFileUrl } from '../services/storage.service';
+import { ucrHasCompletedReservation } from './reservation.controller';
 
 const resolveAvatarUrl = (storagePath: string | null | undefined): string | null =>
   storagePath ? buildFileUrl(storagePath) : null;
@@ -86,6 +87,34 @@ export const getUserById = async (
 
     const { avatar_media, instagram_url, facebook_url, youtube_url, whatsapp_url, linkedin_url, x_url, website_url, ...rest } = user;
 
+    // Rating aggregates: PROVIDER = ratings this USO received from customers;
+    // CUSTOMER = ratings this UCR received from providers. Plus the viewer's own
+    // rating and whether the viewer is eligible to rate this user.
+    const requesterId = req.user?.sub;
+    const requesterType = req.user?.type;
+    const ratings = await prisma.userRating.findMany({
+      where: { target_user_id: id },
+      select: { kind: true, value: true, rater_user_id: true },
+    });
+    const providerRatings = ratings.filter((r) => r.kind === 'PROVIDER');
+    const customerRatings = ratings.filter((r) => r.kind === 'CUSTOMER');
+    const avg = (arr: { value: number }[]): number | null =>
+      arr.length ? Math.round((arr.reduce((s, r) => s + r.value, 0) / arr.length) * 10) / 10 : null;
+
+    const can_rate_provider =
+      requesterType === 'ucr' && requesterId
+        ? await ucrHasCompletedReservation(requesterId, { providerId: id })
+        : false;
+    const can_rate_customer =
+      requesterType === 'uso' && requesterId
+        ? Boolean(
+            await prisma.reservation.findFirst({
+              where: { provider_user_id: requesterId, ucr_id: id, status: 'COMPLETED' },
+              select: { id: true },
+            }),
+          )
+        : false;
+
     sendSuccess({
       res,
       status: 200,
@@ -101,6 +130,18 @@ export const getUserById = async (
           ...(linkedin_url && { linkedin_url }),
           ...(x_url && { x_url }),
           ...(website_url && { website_url }),
+          provider_rating: avg(providerRatings),
+          provider_rating_count: providerRatings.length,
+          customer_rating: avg(customerRatings),
+          customer_rating_count: customerRatings.length,
+          my_provider_rating: requesterId
+            ? providerRatings.find((r) => r.rater_user_id === requesterId)?.value ?? null
+            : null,
+          my_customer_rating: requesterId
+            ? customerRatings.find((r) => r.rater_user_id === requesterId)?.value ?? null
+            : null,
+          can_rate_provider,
+          can_rate_customer,
         },
       },
     });

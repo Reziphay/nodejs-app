@@ -3,6 +3,7 @@ import prisma from '../lib/prisma';
 import { sendSuccess } from '../utils/response';
 import { AppError } from '../middlewares/error.middleware';
 import { buildFileUrl } from '../services/storage.service';
+import { ucrHasCompletedReservation } from './reservation.controller';
 import type {
   CreateBrandInput,
   UpdateBrandInput,
@@ -646,6 +647,13 @@ export const getBrandById = async (
         })
       : 0;
 
+    // A UCR may rate the brand only after a completed reservation for one of its
+    // services. FE uses this to gate the rating UI.
+    const can_rate =
+      req.user?.type === 'ucr' && requesterId
+        ? await ucrHasCompletedReservation(requesterId, { brandId: brand.id })
+        : false;
+
     sendSuccess({
       res,
       status: 200,
@@ -670,6 +678,7 @@ export const getBrandById = async (
           viewer_role,
           viewer_branch_id,
           active_reservations_count,
+          can_rate,
         },
       },
     });
@@ -896,6 +905,15 @@ export const upsertBrandRating = async (
       const err: AppError = new Error();
       err.statusCode = 404;
       err.messageKey = 'brand.not_found';
+      return next(err);
+    }
+
+    // Gate: only customers with at least one completed reservation for one of
+    // this brand's services may rate it.
+    if (!(await ucrHasCompletedReservation(userId, { brandId: id }))) {
+      const err: AppError = new Error();
+      err.statusCode = 403;
+      err.messageKey = 'rating.not_eligible';
       return next(err);
     }
 

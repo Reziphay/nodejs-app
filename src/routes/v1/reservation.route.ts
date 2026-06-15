@@ -9,12 +9,15 @@ import {
   cancelByUso,
   completeReservation,
   markNoShow,
+  rateProvider,
+  rateCustomer,
 } from '../../controllers/reservation.controller';
 import { authenticate } from '../../middlewares/auth.middleware';
 import { validate } from '../../middlewares/validate.middleware';
 import {
   createReservationSchema,
   cancelReservationSchema,
+  rateUserSchema,
 } from '../../schemas/reservation.schema';
 
 const router: Router = Router();
@@ -33,5 +36,9 @@ router.post('/reservations/:id/cancel', authenticate, validate(cancelReservation
 router.post('/reservations/:id/reject', authenticate, validate(cancelReservationSchema), cancelByUso);
 router.post('/reservations/:id/complete', authenticate, completeReservation);
 router.post('/reservations/:id/no-show', authenticate, markNoShow);
+
+// ─── User-to-user ratings (gated by completed reservations) ──────────────────
+router.post('/providers/:userId/rating', authenticate, validate(rateUserSchema), rateProvider);
+router.post('/customers/:userId/rating', authenticate, validate(rateUserSchema), rateCustomer);
 
 export default router;

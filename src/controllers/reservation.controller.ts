@@ -8,6 +8,7 @@ import {
   availabilityQuerySchema,
   type CreateReservationInput,
   type CancelReservationInput,
+  type RateUserInput,
 } from '../schemas/reservation.schema';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -39,6 +40,28 @@ async function getEligibleProviderIds(serviceId: string): Promise<string[]> {
   const ids = new Set<string>([service.owner_id]);
   for (const a of assignments) ids.add(a.team_member.user_id);
   return [...ids];
+}
+
+/**
+ * Rating eligibility: a UCR may rate a brand / service / provider only after at
+ * least one COMPLETED reservation matching the target. Exported so the brand and
+ * service controllers can gate their own rating endpoints consistently.
+ */
+export async function ucrHasCompletedReservation(
+  ucrId: string,
+  target: { brandId?: string; serviceId?: string; providerId?: string },
+): Promise<boolean> {
+  const found = await prisma.reservation.findFirst({
+    where: {
+      ucr_id: ucrId,
+      status: 'COMPLETED',
+      ...(target.serviceId && { service_id: target.serviceId }),
+      ...(target.providerId && { provider_user_id: target.providerId }),
+      ...(target.brandId && { service: { brand_id: target.brandId } }),
+    },
+    select: { id: true },
+  });
+  return Boolean(found);
 }
 
 // ─── Availability ──────────────────────────────────────────────────────────────
@@ -288,15 +311,29 @@ export const cancelByUcr = async (
       return void fail(next, 400, 'reservation.invalid_transition');
 
     const body = req.body as CancelReservationInput;
+    const reason = body.cancel_reason?.trim() || null;
+    // Cancelling a CONFIRMED reservation needs a ≥20-char reason; withdrawing a
+    // still-PENDING request does not.
+    if (r.status === 'CONFIRMED' && (!reason || reason.length < 20))
+      return void fail(next, 400, 'errors.validation_error');
+
+    const svc = await prisma.service.findUnique({ where: { id: r.service_id }, select: { title: true } });
     const updated = await prisma.reservation.update({
       where: { id: r.id },
-      data: { status: 'CANCELLED_BY_UCR', cancel_reason: body.cancel_reason ?? null },
+      data: { status: 'CANCELLED_BY_UCR', cancel_reason: reason },
     });
     await emitNotification({
       user_id: r.provider_user_id,
       type: 'reservation_cancelled_by_ucr',
-      data: { reservation_id: r.id, service_id: r.service_id, starts_at: r.starts_at.toISOString() },
+      data: {
+        reservation_id: r.id,
+        service_id: r.service_id,
+        service_title: svc?.title ?? null,
+        starts_at: r.starts_at.toISOString(),
+        cancel_reason: reason,
+      },
       fallback_title: 'Reservation cancelled',
+      fallback_body: reason ? `Cancelled by customer: ${reason}` : 'Request withdrawn by customer',
     });
     sendSuccess({ res, status: 200, message: 'reservation.cancelled', data: updated });
   } catch (err) {
@@ -318,15 +355,27 @@ export const cancelByUso = async (
       return void fail(next, 400, 'reservation.invalid_transition');
 
     const body = req.body as CancelReservationInput;
+    const reason = body.cancel_reason?.trim() || null;
+    // The provider must always explain a cancellation/rejection to the customer.
+    if (!reason || reason.length < 20) return void fail(next, 400, 'errors.validation_error');
+
+    const svc = await prisma.service.findUnique({ where: { id: r.service_id }, select: { title: true } });
     const updated = await prisma.reservation.update({
       where: { id: r.id },
-      data: { status: 'CANCELLED_BY_USO', cancel_reason: body.cancel_reason ?? null, responded_at: new Date() },
+      data: { status: 'CANCELLED_BY_USO', cancel_reason: reason, responded_at: new Date() },
     });
     await emitNotification({
       user_id: r.ucr_id,
       type: 'reservation_cancelled_by_uso',
-      data: { reservation_id: r.id, service_id: r.service_id, starts_at: r.starts_at.toISOString() },
+      data: {
+        reservation_id: r.id,
+        service_id: r.service_id,
+        service_title: svc?.title ?? null,
+        starts_at: r.starts_at.toISOString(),
+        cancel_reason: reason,
+      },
       fallback_title: 'Reservation cancelled by provider',
+      fallback_body: `Cancelled by provider: ${reason}`,
     });
     sendSuccess({ res, status: 200, message: 'reservation.cancelled', data: updated });
   } catch (err) {
@@ -379,6 +428,80 @@ export const markNoShow = async (
       data: { status: 'NO_SHOW' },
     });
     sendSuccess({ res, status: 200, message: 'reservation.no_show', data: updated });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─── Ratings between users ──────────────────────────────────────────────────────
+
+// UCR rates the USO (provider) who served them. Requires a completed reservation
+// with that provider.
+export const rateProvider = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    if (req.user.type !== 'ucr') return void fail(next, 403, 'errors.forbidden');
+    const providerId = req.params['userId'] as string;
+    const { value } = req.body as RateUserInput;
+
+    if (providerId === req.user.sub) return void fail(next, 400, 'rating.self_not_allowed');
+    if (!(await ucrHasCompletedReservation(req.user.sub, { providerId })))
+      return void fail(next, 403, 'rating.not_eligible');
+
+    const rating = await prisma.userRating.upsert({
+      where: {
+        target_user_id_rater_user_id_kind: {
+          target_user_id: providerId,
+          rater_user_id: req.user.sub,
+          kind: 'PROVIDER',
+        },
+      },
+      update: { value },
+      create: { target_user_id: providerId, rater_user_id: req.user.sub, kind: 'PROVIDER', value },
+    });
+
+    sendSuccess({ res, status: 200, message: 'rating.saved', data: rating });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// USO rates the UCR (customer) they served. Requires a completed reservation with
+// that customer as provider.
+export const rateCustomer = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> => {
+  try {
+    if (req.user.type !== 'uso') return void fail(next, 403, 'errors.forbidden');
+    const customerId = req.params['userId'] as string;
+    const { value } = req.body as RateUserInput;
+
+    if (customerId === req.user.sub) return void fail(next, 400, 'rating.self_not_allowed');
+
+    const found = await prisma.reservation.findFirst({
+      where: { provider_user_id: req.user.sub, ucr_id: customerId, status: 'COMPLETED' },
+      select: { id: true },
+    });
+    if (!found) return void fail(next, 403, 'rating.not_eligible');
+
+    const rating = await prisma.userRating.upsert({
+      where: {
+        target_user_id_rater_user_id_kind: {
+          target_user_id: customerId,
+          rater_user_id: req.user.sub,
+          kind: 'CUSTOMER',
+        },
+      },
+      update: { value },
+      create: { target_user_id: customerId, rater_user_id: req.user.sub, kind: 'CUSTOMER', value },
+    });
+
+    sendSuccess({ res, status: 200, message: 'rating.saved', data: rating });
   } catch (err) {
     next(err);
   }

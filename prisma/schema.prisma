@@ -122,6 +122,8 @@ model User {
   moderation_reviews ModerationReview[]          @relation("ModerationReviewer")
   reservations_as_provider Reservation[]         @relation("ReservationProvider")
   reservations_as_customer Reservation[]         @relation("ReservationCustomer")
+  ratings_received         UserRating[]          @relation("UserRatingTarget")
+  ratings_given            UserRating[]          @relation("UserRatingRater")
 
   avatar_media Media? @relation("UserAvatar", fields: [avatar_media_id], references: [id], onDelete: SetNull)
 
@@ -295,6 +297,32 @@ model BrandRating {
   @@unique([brand_id, user_id])
   @@index([brand_id])
   @@index([user_id])
+}
+
+// A rating between two users tied to completed reservations.
+//   PROVIDER → a UCR rating the USO who served them.
+//   CUSTOMER → a USO rating the UCR they served.
+// One rating per (target, rater, kind); re-rating upserts the same row.
+enum UserRatingKind {
+  PROVIDER
+  CUSTOMER
+}
+
+model UserRating {
+  id             String         @id @default(cuid())
+  target_user_id String
+  rater_user_id  String
+  kind           UserRatingKind
+  value          Int
+  created_at     DateTime       @default(now())
+  updated_at     DateTime       @updatedAt
+
+  target User @relation("UserRatingTarget", fields: [target_user_id], references: [id], onDelete: Cascade)
+  rater  User @relation("UserRatingRater", fields: [rater_user_id], references: [id], onDelete: Cascade)
+
+  @@unique([target_user_id, rater_user_id, kind])
+  @@index([target_user_id, kind])
+  @@index([rater_user_id])
 }
 
 // ─── Notification Feed ───────────────────────────────────────────────────────

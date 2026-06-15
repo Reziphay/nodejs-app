@@ -5,6 +5,7 @@ import { AppError } from '../middlewares/error.middleware';
 import { buildFileUrl } from '../services/storage.service';
 import { validateAndProcessImage, writeFileToDisk } from '../services/media.service';
 import { buildStoragePath, ensureUserStorageDir } from '../services/storage.service';
+import { ucrHasCompletedReservation } from './reservation.controller';
 import type { CreateServiceInput, UpdateServiceInput } from '../schemas/service.schema';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -533,7 +534,17 @@ export const getServiceById = async (
       return next(err);
     }
 
-    sendSuccess({ res, status: 200, message: 'service.found', data: { service: mapService(service, req.user?.sub) } });
+    const can_rate =
+      req.user?.type === 'ucr' && req.user.sub
+        ? await ucrHasCompletedReservation(req.user.sub, { serviceId: service.id })
+        : false;
+
+    sendSuccess({
+      res,
+      status: 200,
+      message: 'service.found',
+      data: { service: { ...mapService(service, req.user?.sub), can_rate } },
+    });
   } catch (err) {
     next(err);
   }
@@ -543,16 +554,57 @@ export const getServiceById = async (
 
 export const upsertServiceRating = async (
   req: Request,
-  _res: Response,
+  res: Response,
   next: NextFunction,
 ): Promise<void> => {
   try {
     if (!requireUcr(req, next)) return;
 
-    const err: AppError = new Error();
-    err.statusCode = 501;
-    err.messageKey = 'service.rating_not_available';
-    return next(err);
+    const id = req.params['id'] as string;
+    const userId = req.user.sub;
+    const value = Number((req.body as { value?: unknown }).value);
+
+    if (!Number.isInteger(value) || value < 1 || value > 5) {
+      const err: AppError = new Error();
+      err.statusCode = 400;
+      err.messageKey = 'errors.validation_error';
+      return next(err);
+    }
+
+    const service = await prisma.service.findUnique({
+      where: { id },
+      select: { id: true, status: true },
+    });
+    if (!service) {
+      const err: AppError = new Error();
+      err.statusCode = 404;
+      err.messageKey = 'service.not_found';
+      return next(err);
+    }
+
+    // Gate: only customers with a completed reservation for this service may rate.
+    if (!(await ucrHasCompletedReservation(userId, { serviceId: id }))) {
+      const err: AppError = new Error();
+      err.statusCode = 403;
+      err.messageKey = 'rating.not_eligible';
+      return next(err);
+    }
+
+    await prisma.serviceRating.upsert({
+      where: { service_id_user_id: { service_id: id, user_id: userId } },
+      update: { value },
+      create: { service_id: id, user_id: userId, value },
+    });
+
+    const updated = await prisma.service.findUnique({ where: { id }, select: serviceSelect });
+    if (!updated) {
+      const err: AppError = new Error();
+      err.statusCode = 404;
+      err.messageKey = 'service.not_found';
+      return next(err);
+    }
+
+    sendSuccess({ res, status: 200, message: 'service.rating_saved', data: { service: mapService(updated, userId) } });
   } catch (err) {
     next(err);
   }

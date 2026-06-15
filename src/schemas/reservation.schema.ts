@@ -13,11 +13,22 @@ export const createReservationSchema = z.object({
 
 export type CreateReservationInput = z.infer<typeof createReservationSchema>;
 
+// Reason is optional at the schema level; controllers enforce the ≥20-char rule
+// where it applies (cancelling a CONFIRMED reservation, or any USO cancel/reject).
+// A UCR withdrawing a still-PENDING request needs no reason.
 export const cancelReservationSchema = z.object({
-  cancel_reason: z.string().max(1000).trim().optional(),
+  cancel_reason: z.string().trim().max(1000).optional(),
 });
 
 export type CancelReservationInput = z.infer<typeof cancelReservationSchema>;
+
+// ─── Rating ──────────────────────────────────────────────────────────────────
+
+export const rateUserSchema = z.object({
+  value: z.number().int().min(1).max(5),
+});
+
+export type RateUserInput = z.infer<typeof rateUserSchema>;
 
 // ─── Availability query ──────────────────────────────────────────────────────
 
