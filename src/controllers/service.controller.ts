@@ -114,6 +114,31 @@ const serviceSelect = {
       user_id: true,
     },
   },
+  // Accepted providers (USOs) who perform this service, each tied to the branch
+  // their team belongs to. Used to show "which USO does which service" on the
+  // brand page and to drive branch→provider selection when booking.
+  member_assignments: {
+    where: {
+      status: 'ACCEPTED' as const,
+      team_member: { status: 'ACCEPTED' as const },
+    },
+    select: {
+      team_member: {
+        select: {
+          user_id: true,
+          user: {
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              avatar_media: { select: { storage_path: true } },
+            },
+          },
+          team: { select: { branch: { select: { id: true, name: true } } } },
+        },
+      },
+    },
+  },
 } as const;
 
 function roundRating(value: number): number {
@@ -183,6 +208,16 @@ function mapService(raw: any, requesterId?: string) {
     rating: publicRating,
     rating_count: publicRatingCount,
     my_rating: myRating,
+    providers: (raw.member_assignments ?? []).map((a: any) => ({
+      user_id: a.team_member.user.id,
+      first_name: a.team_member.user.first_name,
+      last_name: a.team_member.user.last_name,
+      avatar_url: a.team_member.user.avatar_media
+        ? buildFileUrl(a.team_member.user.avatar_media.storage_path)
+        : null,
+      branch_id: a.team_member.team.branch.id,
+      branch_name: a.team_member.team.branch.name,
+    })),
     created_at: raw.created_at.toISOString(),
     updated_at: raw.updated_at.toISOString(),
   };
@@ -385,6 +420,7 @@ export const listPublicServices = async (
     const branch_id = typeof req.query['branch_id'] === 'string' ? req.query['branch_id'] : undefined;
     const brand_id = typeof req.query['brand_id'] === 'string' ? req.query['brand_id'] : undefined;
     const owner_id = typeof req.query['owner_id'] === 'string' ? req.query['owner_id'] : undefined;
+    const provider_id = typeof req.query['provider_id'] === 'string' ? req.query['provider_id'] : undefined;
     const direct_only = req.query['direct_only'] === 'true';
     const q = typeof req.query['q'] === 'string' ? req.query['q'] : undefined;
     const page = Math.max(1, Number.parseInt(String(req.query['page'] ?? '1'), 10) || 1);
@@ -396,11 +432,18 @@ export const listPublicServices = async (
       ...(brand_id && !direct_only && { brand_id }),
       ...(owner_id && { owner_id }),
       ...(direct_only && { brand_id: null }),
-      ...(branch_id && {
+      // Filter by an accepted provider: services this USO is assigned to (and
+      // optionally within a specific branch). Both conditions merge into one
+      // `some` so a service must satisfy them on the same assignment row.
+      ...((branch_id || provider_id) && {
         member_assignments: {
           some: {
             status: 'ACCEPTED' as const,
-            team_member: { status: 'ACCEPTED' as const, team: { branch_id } },
+            team_member: {
+              status: 'ACCEPTED' as const,
+              ...(branch_id && { team: { branch_id } }),
+              ...(provider_id && { user_id: provider_id }),
+            },
           },
         },
       }),

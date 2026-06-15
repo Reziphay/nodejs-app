@@ -275,6 +275,17 @@ type BranchRaw = {
   cover_media: { id: string; storage_path: string } | null;
 };
 
+type BranchMemberRaw = {
+  user_id: string;
+  role: string;
+  user: {
+    id: string;
+    first_name: string;
+    last_name: string;
+    avatar_media: { storage_path: string } | null;
+  };
+};
+
 function mapBranch(raw: BranchRaw) {
   return {
     id: raw.id,
@@ -561,10 +572,22 @@ export const getBrandById = async (
             team: {
               select: {
                 members: {
-                  where: requesterId
-                    ? { user_id: requesterId, status: 'ACCEPTED' }
-                    : { id: '__never__' },
-                  select: { id: true, role: true },
+                  // All ACCEPTED members are public: they are the people who
+                  // work at (and provide services from) this branch. Any viewer
+                  // sees them. Requester's own role is derived from this list.
+                  where: { status: 'ACCEPTED' },
+                  select: {
+                    user_id: true,
+                    role: true,
+                    user: {
+                      select: {
+                        id: true,
+                        first_name: true,
+                        last_name: true,
+                        avatar_media: { select: { storage_path: true } },
+                      },
+                    },
+                  },
                 },
               },
             },
@@ -587,7 +610,8 @@ export const getBrandById = async (
       ? brand.branches.find(
           (br) =>
             br.team?.members.some(
-              (m: { id: string; role: string }) => m.role === 'MEMBER',
+              (m: { user_id: string; role: string }) =>
+                m.user_id === requesterId && m.role === 'MEMBER',
             ),
         )
       : undefined;
@@ -629,7 +653,20 @@ export const getBrandById = async (
       data: {
         brand: {
           ...mapBrand(brand as BrandRaw, requesterId),
-          branches: brand.branches.map((b) => mapBranch(b as BranchRaw)),
+          branches: brand.branches.map((b) => ({
+            ...mapBranch(b as BranchRaw),
+            members: (
+              (b as { team?: { members?: BranchMemberRaw[] } }).team?.members ?? []
+            ).map((m) => ({
+              user_id: m.user_id,
+              first_name: m.user.first_name,
+              last_name: m.user.last_name,
+              avatar_url: m.user.avatar_media
+                ? buildFileUrl(m.user.avatar_media.storage_path)
+                : null,
+              role: m.role,
+            })),
+          })),
           viewer_role,
           viewer_branch_id,
           active_reservations_count,
